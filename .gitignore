@@ -1,3 +1,9 @@
 *.exe
 *.o
 __pycache__/
+
+# gen_humanoid_assets.exe로 재생성 가능한 산출물
+body.obj
+head.obj
+arm.obj
+humanoid_scene.txt
