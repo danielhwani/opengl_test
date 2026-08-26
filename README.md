@@ -63,7 +63,7 @@ freeglut 헤더/라이브러리가 없어 이 프로젝트에서는 사용하지
 **Git Bash**
 ```bash
 export PATH="/d/OpenModelica1.26.3-64bit/tools/msys/ucrt64/bin:$PATH"
-cd /c/claude_test/computer_graphics
+cd /d/claude_test/computer_graphics
 gcc teapot_test.c -o teapot_test.exe -lfreeglut -lopengl32 -lglu32 -lwinmm
 ./teapot_test.exe
 ```
@@ -71,7 +71,7 @@ gcc teapot_test.c -o teapot_test.exe -lfreeglut -lopengl32 -lglu32 -lwinmm
 **cmd.exe**
 ```cmd
 set PATH=D:\OpenModelica1.26.3-64bit\tools\msys\ucrt64\bin;%PATH%
-cd C:\claude_test\computer_graphics
+cd D:\claude_test\computer_graphics
 gcc teapot_test.c -o teapot_test.exe -lfreeglut -lopengl32 -lglu32 -lwinmm
 teapot_test.exe
 ```
@@ -79,7 +79,7 @@ teapot_test.exe
 **PowerShell**
 ```powershell
 $env:PATH = "D:\OpenModelica1.26.3-64bit\tools\msys\ucrt64\bin;" + $env:PATH
-cd C:\claude_test\computer_graphics
+cd D:\claude_test\computer_graphics
 gcc teapot_test.c -o teapot_test.exe -lfreeglut -lopengl32 -lglu32 -lwinmm
 .\teapot_test.exe
 ```
@@ -130,7 +130,7 @@ ROOT
 
 ```bash
 export PATH="/d/OpenModelica1.26.3-64bit/tools/msys/ucrt64/bin:$PATH"
-cd /c/claude_test/computer_graphics
+cd /d/claude_test/computer_graphics
 gcc humanoid_test.c -o humanoid_test.exe -lfreeglut -lopengl32 -lglu32 -lwinmm
 ./humanoid_test.exe
 ```
@@ -141,7 +141,7 @@ gcc humanoid_test.c -o humanoid_test.exe -lfreeglut -lopengl32 -lglu32 -lwinmm
 
 ```bash
 export PATH="/d/OpenModelica1.26.3-64bit/tools/msys/ucrt64/bin:$PATH"
-cd /c/claude_test/computer_graphics
+cd /d/claude_test/computer_graphics
 
 gcc gen_humanoid_assets.c -o gen_humanoid_assets.exe -lm
 ./gen_humanoid_assets.exe
