@@ -1,7 +1,7 @@
 /*
  * humanoid_loader_test.c
  * -----------------------
- * gen_humanoid_assets.c가 만들어낸 body.obj / head.obj / arm.obj
+ * gen_humanoid_assets.c가 만들어낸 body.obj / head.obj / arm.obj / leg.obj
  * (표준 Wavefront OBJ)와 humanoid_scene.txt(계층/관절 정보)를
  * 런타임에 읽어서 렌더링하는 프로그램.
  *
@@ -17,9 +17,9 @@
  *   gcc humanoid_loader_test.c -o humanoid_loader_test.exe -lfreeglut -lopengl32 -lglu32 -lwinmm
  *
  * 실행 전에 gen_humanoid_assets.exe를 먼저 실행해서
- * body.obj / head.obj / arm.obj / humanoid_scene.txt를 만들어둬야 한다.
+ * body.obj / head.obj / arm.obj / leg.obj / humanoid_scene.txt를 만들어둬야 한다.
  *
- * 조작: humanoid_test.c와 동일 (Space, Q/A, E/D, R, ESC)
+ * 조작: humanoid_test.c와 동일 (Space, Q/A, E/D, Z/X, C/V, R, ESC)
  */
 
 #include <GL/freeglut.h>
@@ -157,11 +157,15 @@ static void load_scene(const char *filename) {
 static double t = 0.0;
 static double left_angle = 0.0;
 static double right_angle = 0.0;
+static double left_leg_angle = 0.0;
+static double right_leg_angle = 0.0;
 static int animate = 1;
 
 static double angle_for_part(const char *name) {
     if (strcmp(name, "LeftArm") == 0) return left_angle;
     if (strcmp(name, "RightArm") == 0) return right_angle;
+    if (strcmp(name, "LeftLeg") == 0) return left_leg_angle;
+    if (strcmp(name, "RightLeg") == 0) return right_leg_angle;
     return 0.0;
 }
 
@@ -233,6 +237,8 @@ static void idle(void) {
         t += 0.004;
         left_angle = 35.0 * sin(t);
         right_angle = -35.0 * sin(t);
+        left_leg_angle = -25.0 * sin(t);
+        right_leg_angle = 25.0 * sin(t);
     }
     glutPostRedisplay();
 }
@@ -255,8 +261,22 @@ static void keyboard(unsigned char key, int x, int y) {
         case 'd': case 'D':
             animate = 0; right_angle -= 5.0;
             break;
+        case 'z': case 'Z':
+            animate = 0; left_leg_angle += 5.0;
+            break;
+        case 'x': case 'X':
+            animate = 0; left_leg_angle -= 5.0;
+            break;
+        case 'c': case 'C':
+            animate = 0; right_leg_angle += 5.0;
+            break;
+        case 'v': case 'V':
+            animate = 0; right_leg_angle -= 5.0;
+            break;
         case 'r': case 'R':
-            left_angle = 0.0; right_angle = 0.0; t = 0.0;
+            left_angle = 0.0; right_angle = 0.0;
+            left_leg_angle = 0.0; right_leg_angle = 0.0;
+            t = 0.0;
             break;
         case 27: /* ESC */
             glutLeaveMainLoop();

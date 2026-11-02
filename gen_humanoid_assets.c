@@ -7,8 +7,8 @@
  * (humanoid_scene.txt)로 저장한다.
  *
  * 출력:
- *   body.obj, head.obj, arm.obj   - 표준 Wavefront OBJ 메쉬
- *   humanoid_scene.txt            - 부위 이름/메쉬/부모/위치/관절/색 정보
+ *   body.obj, head.obj, arm.obj, leg.obj   - 표준 Wavefront OBJ 메쉬
+ *   humanoid_scene.txt                      - 부위 이름/메쉬/부모/위치/관절/색 정보
  *
  * humanoid_loader_test.c가 이 파일들을 읽어서 렌더링한다.
  *
@@ -30,6 +30,10 @@
 #define ARM_LEN 1.0
 #define ARM_D 0.25
 #define SHOULDER_X (BODY_W / 2.0 + ARM_W / 2.0)
+#define LEG_W 0.3
+#define LEG_LEN 1.2
+#define LEG_D 0.3
+#define HIP_X ((BODY_W - LEG_W) / 2.0)
 
 static void write_quad(FILE *f, int *vcount,
                         double p1[3], double p2[3], double p3[3], double p4[3],
@@ -130,6 +134,8 @@ static void write_scene(const char *filename) {
     fprintf(f, "Head       head.obj   Body    0.0      %.4f    0.0  NONE   0.85  0.75  0.65\n", BODY_H / 2.0);
     fprintf(f, "LeftArm    arm.obj    Body    %.4f     %.4f    0.0  ROTX   0.45  0.45  0.55\n", -SHOULDER_X, BODY_H / 2.0);
     fprintf(f, "RightArm   arm.obj    Body    %.4f     %.4f    0.0  ROTX   0.45  0.45  0.55\n", SHOULDER_X, BODY_H / 2.0);
+    fprintf(f, "LeftLeg    leg.obj    Body    %.4f     %.4f    0.0  ROTX   0.35  0.35  0.45\n", -HIP_X, -BODY_H / 2.0);
+    fprintf(f, "RightLeg   leg.obj    Body    %.4f     %.4f    0.0  ROTX   0.35  0.35  0.45\n", HIP_X, -BODY_H / 2.0);
     fclose(f);
     printf("wrote %s\n", filename);
 }
@@ -141,6 +147,9 @@ int main(void) {
     /* 팔: 어깨(원점)에서 아래로 매달린 형태 (y: -ARM_LEN..0) */
     write_box_obj("arm.obj", -ARM_W / 2.0, ARM_W / 2.0,
                    -ARM_LEN, 0.0, -ARM_D / 2.0, ARM_D / 2.0);
+    /* 다리: 엉덩이(원점)에서 아래로 매달린 형태 (y: -LEG_LEN..0) */
+    write_box_obj("leg.obj", -LEG_W / 2.0, LEG_W / 2.0,
+                   -LEG_LEN, 0.0, -LEG_D / 2.0, LEG_D / 2.0);
     write_scene("humanoid_scene.txt");
     return 0;
 }

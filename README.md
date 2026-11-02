@@ -5,7 +5,7 @@
 1. **Teapot test** — `glBegin(GL_TRIANGLES)` / `glVertex3d` / `glNormal3d` /
    `glTexCoord2d` 패턴을 `glutSolidTeapot()`을 통해 확인 (Python/C 양쪽 구현)
 2. **Humanoid matrix stack test** — `glPushMatrix`/`glPopMatrix`로 몸통-머리-
-   양팔을 **하나로 이어진 계층 구조**로 다루는 예제 (C, 하드코딩 버전 + OBJ 로더 버전)
+   양팔-양다리를 **하나로 이어진 계층 구조**로 다루는 예제 (C, 하드코딩 버전 + OBJ 로더 버전)
 
 ## 파일
 
@@ -111,10 +111,6 @@ ROOT
      └─ RightLeg(T3 × R4)        → 최종 변환 = T1 × T3 × R4
 ```
 
-(`LeftLeg`/`RightLeg`는 현재 `humanoid_test.c`(하드코딩 버전)에만 반영되어
-있고, `gen_humanoid_assets.c`/`humanoid_loader_test.c`(OBJ 로더 버전)는
-아직 Body/Head/양팔까지만 생성한다.)
-
 이게 왜 "수직적 연계"인지: `Body`(T1)를 옮기면 그 아래 매달린 `Head`,
 `LeftArm`, `RightArm`도 전부 같이 따라 움직인다 — 셋 다 자기 변환 앞에
 `T1`을 곱하고 있기 때문이다. 즉 부모의 변화가 자식 전체에 전파된다.
@@ -153,7 +149,7 @@ cd /d/claude_test/computer_graphics
 
 gcc gen_humanoid_assets.c -o gen_humanoid_assets.exe -lm
 ./gen_humanoid_assets.exe
-# → body.obj, head.obj, arm.obj, humanoid_scene.txt 생성
+# → body.obj, head.obj, arm.obj, leg.obj, humanoid_scene.txt 생성
 
 gcc humanoid_loader_test.c -o humanoid_loader_test.exe -lfreeglut -lopengl32 -lglu32 -lwinmm
 ./humanoid_loader_test.exe
@@ -168,10 +164,12 @@ Body       body.obj   ROOT    0.0      0.7000    0.0  NONE   0.55  0.55  0.65
 Head       head.obj   Body    0.0      0.7000    0.0  NONE   0.85  0.75  0.65
 LeftArm    arm.obj    Body    -0.5250  0.7000    0.0  ROTX   0.45  0.45  0.55
 RightArm   arm.obj    Body    0.5250   0.7000    0.0  ROTX   0.45  0.45  0.55
+LeftLeg    leg.obj    Body    -0.2500  -0.7000   0.0  ROTX   0.35  0.35  0.45
+RightLeg   leg.obj    Body    0.2500   -0.7000   0.0  ROTX   0.35  0.35  0.45
 ```
 
-`Head`/`LeftArm`/`RightArm`의 `parent`가 전부 `Body`로 적혀 있는 것이
-바로 이 수직 연계를 데이터로 표현한 부분이다.
+`Head`/`LeftArm`/`RightArm`/`LeftLeg`/`RightLeg`의 `parent`가 전부 `Body`로
+적혀 있는 것이 바로 이 수직 연계를 데이터로 표현한 부분이다.
 
 ## 구현 메모
 

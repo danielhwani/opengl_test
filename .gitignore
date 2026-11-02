@@ -6,4 +6,5 @@ __pycache__/
 body.obj
 head.obj
 arm.obj
+leg.obj
 humanoid_scene.txt
