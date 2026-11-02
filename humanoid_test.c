@@ -2,8 +2,9 @@
  * humanoid_test.c
  * ---------------
  * glPushMatrix/glPopMatrix로 계층적 모델링(hierarchical modeling)을
- * 테스트하는 예제. 몸통(Body) 위에 머리(Head)와 양팔(Left/Right arm)을
- * 붙이고, 스택을 이용해 각 부위의 변환을 독립적으로 유지한다.
+ * 테스트하는 예제. 몸통(Body) 위에 머리(Head)와 양팔(Left/Right arm),
+ * 아래에 양다리(Left/Right leg)를 붙이고, 스택을 이용해 각 부위의
+ * 변환을 독립적으로 유지한다.
  *
  * 행렬 스택 구조:
  *   glPushMatrix();
@@ -33,6 +34,8 @@
  *   스페이스바 : 자동 애니메이션 on/off
  *   Q / A      : 왼팔 각도 직접 조정 (자동 애니메이션은 자동으로 꺼짐)
  *   E / D      : 오른팔 각도 직접 조정
+ *   Z / X      : 왼다리 각도 직접 조정
+ *   C / V      : 오른다리 각도 직접 조정
  *   R          : 각도 초기화
  *   ESC        : 종료
  */
@@ -52,10 +55,17 @@
 #define ARM_D 0.25
 #define SHOULDER_X (BODY_W / 2.0 + ARM_W / 2.0)
 
+#define LEG_W 0.3
+#define LEG_LEN 1.2
+#define LEG_D 0.3
+#define HIP_X ((BODY_W - LEG_W) / 2.0)
+
 /* ---- 상태값 ---- */
 static double t = 0.0;
 static double left_angle = 0.0;
 static double right_angle = 0.0;
+static double left_leg_angle = 0.0;
+static double right_leg_angle = 0.0;
 static int animate = 1;
 
 static void init_gl(void) {
@@ -117,6 +127,17 @@ static void draw_arm(double side_x) {
     glPopMatrix();
 }
 
+/* 다리: 엉덩이(현재 원점)에서 아래로 매달리는 상자. 팔과 같은 원리로
+   x축 회전이 그대로 엉덩이 관절 회전이 된다. */
+static void draw_leg(double side_x) {
+    glPushMatrix();
+    glColor3f(0.35f, 0.35f, 0.45f);
+    glTranslated(side_x, -LEG_LEN / 2.0, 0.0);
+    glScaled(LEG_W, LEG_LEN, LEG_D);
+    glutSolidCube(1.0);
+    glPopMatrix();
+}
+
 static void display(void) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glLoadIdentity();
@@ -142,6 +163,20 @@ static void display(void) {
                 draw_arm(SHOULDER_X);
             glPopMatrix();                          /* -> T1*T2 복귀 (R2 제거) */
         glPopMatrix();                              /* -> T1 복귀 (head 변환 제거) */
+
+        glPushMatrix();
+            glTranslated(0.0, -BODY_H / 2.0, 0.0); /* legs: T1*T3 (T3 = 몸통 바닥) */
+
+            glPushMatrix();
+                glRotated(left_leg_angle, 1, 0, 0);  /* left_leg: T1*T3*R3 */
+                draw_leg(-HIP_X);
+            glPopMatrix();                            /* -> T1*T3 복귀 (R3 제거) */
+
+            glPushMatrix();
+                glRotated(right_leg_angle, 1, 0, 0); /* right_leg: T1*T3*R4 (R3 영향 없음) */
+                draw_leg(HIP_X);
+            glPopMatrix();                            /* -> T1*T3 복귀 (R4 제거) */
+        glPopMatrix();                                /* -> T1 복귀 (legs 변환 제거) */
     glPopMatrix();                                   /* -> 원점 복귀 (body 변환 제거) */
 
     glutSwapBuffers();
@@ -152,6 +187,10 @@ static void idle(void) {
         t += 0.004;
         left_angle = 35.0 * sin(t);
         right_angle = -35.0 * sin(t);   /* 왼팔과 반대 위상 - 걷는 팔처럼 */
+        /* 걷는 동작: 왼팔과 같은 쪽 다리가 아니라 반대쪽 팔과 같은 위상으로
+           움직여야 자연스럽다 (오른팔이 앞으로 나올 때 왼다리가 앞으로). */
+        left_leg_angle = -25.0 * sin(t);
+        right_leg_angle = 25.0 * sin(t);
     }
     glutPostRedisplay();
 }
@@ -174,8 +213,22 @@ static void keyboard(unsigned char key, int x, int y) {
         case 'd': case 'D':
             animate = 0; right_angle -= 5.0;
             break;
+        case 'z': case 'Z':
+            animate = 0; left_leg_angle += 5.0;
+            break;
+        case 'x': case 'X':
+            animate = 0; left_leg_angle -= 5.0;
+            break;
+        case 'c': case 'C':
+            animate = 0; right_leg_angle += 5.0;
+            break;
+        case 'v': case 'V':
+            animate = 0; right_leg_angle -= 5.0;
+            break;
         case 'r': case 'R':
-            left_angle = 0.0; right_angle = 0.0; t = 0.0;
+            left_angle = 0.0; right_angle = 0.0;
+            left_leg_angle = 0.0; right_leg_angle = 0.0;
+            t = 0.0;
             break;
         case 27: /* ESC */
             glutLeaveMainLoop();
@@ -197,7 +250,7 @@ int main(int argc, char** argv) {
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
     glutInitWindowSize(800, 600);
-    glutCreateWindow("Humanoid Matrix Stack Test - Body/Head/Left arm/Right arm");
+    glutCreateWindow("Humanoid Matrix Stack Test - Body/Head/Arms/Legs");
 
     init_gl();
 

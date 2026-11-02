@@ -26,6 +26,8 @@
 | L | 조명 on/off | teapot |
 | Q / A | 왼팔 각도 수동 증가/감소 | humanoid |
 | E / D | 오른팔 각도 수동 증가/감소 | humanoid |
+| Z / X | 왼다리 각도 수동 증가/감소 | humanoid |
+| C / V | 오른다리 각도 수동 증가/감소 | humanoid |
 | R | 각도 초기화 | humanoid |
 | ESC | 종료 | 공통 |
 
@@ -104,8 +106,14 @@ ROOT
  └─ Body       (T1)              → 최종 변환 = T1
      ├─ Head    (T2)             → 최종 변환 = T1 × T2
      ├─ LeftArm (T2 × R1)        → 최종 변환 = T1 × T2 × R1
-     └─ RightArm(T2 × R2)        → 최종 변환 = T1 × T2 × R2
+     ├─ RightArm(T2 × R2)        → 최종 변환 = T1 × T2 × R2
+     ├─ LeftLeg (T3 × R3)        → 최종 변환 = T1 × T3 × R3
+     └─ RightLeg(T3 × R4)        → 최종 변환 = T1 × T3 × R4
 ```
+
+(`LeftLeg`/`RightLeg`는 현재 `humanoid_test.c`(하드코딩 버전)에만 반영되어
+있고, `gen_humanoid_assets.c`/`humanoid_loader_test.c`(OBJ 로더 버전)는
+아직 Body/Head/양팔까지만 생성한다.)
 
 이게 왜 "수직적 연계"인지: `Body`(T1)를 옮기면 그 아래 매달린 `Head`,
 `LeftArm`, `RightArm`도 전부 같이 따라 움직인다 — 셋 다 자기 변환 앞에
