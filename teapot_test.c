@@ -9,20 +9,72 @@
  *   gcc teapot_test.c -o teapot_test.exe -lfreeglut -lopengl32 -lglu32 -lwinmm
  *
  * 조작:
- *   스페이스바 : 와이어프레임 <-> 솔리드 토글
- *   T          : 텍스처 on/off
- *   L          : 조명 on/off
- *   ESC        : 종료
+ *   스페이스바      : 와이어프레임 <-> 솔리드 토글
+ *   T               : 텍스처 on/off
+ *   L               : 조명 on/off
+ *   마우스 왼쪽 드래그 : 카메라 궤도 회전
+ *   마우스 휠        : 줌 인/아웃
+ *   ESC             : 종료
  */
 
 #include <GL/freeglut.h>
 #include <stdlib.h>
+#include <math.h>
+
+#define CAM_PI 3.14159265358979323846
 
 static double angle = 0.0;
 static int wireframe = 0;
 static int lighting = 1;
 static int texturing = 1;
 static GLuint texture_id = 0;
+
+/* ---- 카메라: 원점을 바라보는 궤도(orbit) 카메라.
+   yaw/pitch/dist(구면 좌표)를 마우스로 바꾸고 매 프레임 직교 좌표로
+   환산해 gluLookAt에 넘긴다. ---- */
+static double cam_yaw = 45.0;    /* degrees, y축 둘레 회전 */
+static double cam_pitch = 25.0;  /* degrees, -89..89로 클램프 (gimbal lock 방지) */
+static double cam_dist = 5.5;
+static int mouse_dragging = 0;
+static int last_mouse_x = 0, last_mouse_y = 0;
+
+static void apply_camera(void) {
+    double yaw_r = cam_yaw * CAM_PI / 180.0;
+    double pitch_r = cam_pitch * CAM_PI / 180.0;
+    double ex = cam_dist * cos(pitch_r) * sin(yaw_r);
+    double ey = cam_dist * sin(pitch_r);
+    double ez = cam_dist * cos(pitch_r) * cos(yaw_r);
+    gluLookAt(ex, ey, ez, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0);
+}
+
+static void mouse_button(int button, int state, int x, int y) {
+    if (button == GLUT_LEFT_BUTTON) {
+        mouse_dragging = (state == GLUT_DOWN);
+        last_mouse_x = x; last_mouse_y = y;
+    }
+}
+
+static void mouse_motion(int x, int y) {
+    if (!mouse_dragging) return;
+    int dx = x - last_mouse_x;
+    int dy = y - last_mouse_y;
+    last_mouse_x = x; last_mouse_y = y;
+
+    cam_yaw += dx * 0.4;
+    cam_pitch += dy * 0.4;
+    if (cam_pitch > 89.0) cam_pitch = 89.0;
+    if (cam_pitch < -89.0) cam_pitch = -89.0;
+
+    glutPostRedisplay();
+}
+
+static void mouse_wheel(int wheel, int direction, int x, int y) {
+    (void)wheel; (void)x; (void)y;
+    cam_dist -= direction * 0.4;
+    if (cam_dist < 1.5) cam_dist = 1.5;
+    if (cam_dist > 20.0) cam_dist = 20.0;
+    glutPostRedisplay();
+}
 
 #define TEX_SIZE 64
 #define TEX_SQUARES 8
@@ -97,7 +149,7 @@ static void draw_axes(double length) {
 static void display(void) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glLoadIdentity();
-    gluLookAt(3.5, 2.5, 3.5, 0, 0, 0, 0, 1, 0);
+    apply_camera();
 
     draw_axes(1.5);
 
@@ -169,6 +221,9 @@ int main(int argc, char** argv) {
     glutReshapeFunc(reshape);
     glutKeyboardFunc(keyboard);
     glutIdleFunc(idle);
+    glutMouseFunc(mouse_button);
+    glutMotionFunc(mouse_motion);
+    glutMouseWheelFunc(mouse_wheel);
 
     glutMainLoop();
     return 0;

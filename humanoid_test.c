@@ -38,12 +38,16 @@
  *   C / V      : 오른다리 각도 직접 조정
  *   T          : 텍스처 on/off
  *   L          : 조명 on/off
+ *   마우스 왼쪽 드래그 : 카메라 궤도 회전
+ *   마우스 휠        : 줌 인/아웃
  *   R          : 각도 초기화
  *   ESC        : 종료
  */
 
 #include <GL/freeglut.h>
 #include <math.h>
+
+#define CAM_PI 3.14159265358979323846
 
 /* ---- 사람 형태 치수 ---- */
 #define BODY_W 0.8
@@ -133,6 +137,54 @@ static void init_gl(void) {
     glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 }
 
+/* ---- 카메라: (0, CAM_TARGET_Y, 0)을 바라보는 궤도(orbit) 카메라.
+   yaw/pitch/dist(구면 좌표)를 마우스로 바꾸고 매 프레임 직교 좌표로
+   환산해 gluLookAt에 넘긴다. ---- */
+static double cam_yaw = 45.0;    /* degrees, y축 둘레 회전 */
+static double cam_pitch = 21.0;  /* degrees, -89..89로 클램프 (gimbal lock 방지) */
+static double cam_dist = 6.0;
+#define CAM_TARGET_Y 0.9
+static int mouse_dragging = 0;
+static int last_mouse_x = 0, last_mouse_y = 0;
+
+static void apply_camera(void) {
+    double yaw_r = cam_yaw * CAM_PI / 180.0;
+    double pitch_r = cam_pitch * CAM_PI / 180.0;
+    double ex = cam_dist * cos(pitch_r) * sin(yaw_r);
+    double ey = CAM_TARGET_Y + cam_dist * sin(pitch_r);
+    double ez = cam_dist * cos(pitch_r) * cos(yaw_r);
+    gluLookAt(ex, ey, ez, 0.0, CAM_TARGET_Y, 0.0, 0.0, 1.0, 0.0);
+}
+
+static void mouse_button(int button, int state, int x, int y) {
+    if (button == GLUT_LEFT_BUTTON) {
+        mouse_dragging = (state == GLUT_DOWN);
+        last_mouse_x = x; last_mouse_y = y;
+    }
+}
+
+static void mouse_motion(int x, int y) {
+    if (!mouse_dragging) return;
+    int dx = x - last_mouse_x;
+    int dy = y - last_mouse_y;
+    last_mouse_x = x; last_mouse_y = y;
+
+    cam_yaw += dx * 0.4;
+    cam_pitch += dy * 0.4;
+    if (cam_pitch > 89.0) cam_pitch = 89.0;
+    if (cam_pitch < -89.0) cam_pitch = -89.0;
+
+    glutPostRedisplay();
+}
+
+static void mouse_wheel(int wheel, int direction, int x, int y) {
+    (void)wheel; (void)x; (void)y;
+    cam_dist -= direction * 0.4;
+    if (cam_dist < 1.5) cam_dist = 1.5;
+    if (cam_dist > 20.0) cam_dist = 20.0;
+    glutPostRedisplay();
+}
+
 static void draw_axes(double length) {
     glDisable(GL_LIGHTING);
     glBegin(GL_LINES);
@@ -188,7 +240,7 @@ static void draw_leg(double side_x) {
 static void display(void) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glLoadIdentity();
-    gluLookAt(4.0, 2.2, 4.0, 0.0, 0.9, 0.0, 0.0, 1.0, 0.0);
+    apply_camera();
 
     draw_axes(1.0);
 
@@ -321,6 +373,9 @@ int main(int argc, char** argv) {
     glutReshapeFunc(reshape);
     glutKeyboardFunc(keyboard);
     glutIdleFunc(idle);
+    glutMouseFunc(mouse_button);
+    glutMotionFunc(mouse_motion);
+    glutMouseWheelFunc(mouse_wheel);
 
     glutMainLoop();
     return 0;
