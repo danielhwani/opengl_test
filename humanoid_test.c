@@ -38,6 +38,8 @@
  *   C / V      : 오른다리 각도 직접 조정
  *   T          : 텍스처 on/off
  *   L          : 조명 on/off
+ *   방향키 위/아래 : 몸통 전진/후진 (자동 애니메이션은 자동으로 꺼짐)
+ *   방향키 좌/우  : 몸통 좌/우 회전
  *   마우스 왼쪽 드래그 : 카메라 궤도 회전
  *   마우스 휠        : 줌 인/아웃
  *   R          : 각도 초기화
@@ -72,6 +74,11 @@ static double left_angle = 0.0;
 static double right_angle = 0.0;
 static double left_leg_angle = 0.0;
 static double right_leg_angle = 0.0;
+/* 몸통 전체의 월드 위치/방향 - 팔다리와 달리 "관절"이 아니라 트리
+   전체(ROOT)에 적용되는 변환이라 다른 모든 부위를 다 끌고 다닌다. */
+static double body_x = 0.0;
+static double body_z = 0.0;
+static double body_heading = 0.0; /* degrees, y축 둘레 회전 */
 static int animate = 1;
 static int lighting = 1;
 static int texturing = 1;
@@ -138,6 +145,10 @@ static void init_gl(void) {
 }
 
 /* ---- 카메라: (0, CAM_TARGET_Y, 0)을 바라보는 궤도(orbit) 카메라.
+   타겟을 몸통 위치에 맞춰 따라가게 하면 몸통이 실제로 이동해도 화면상
+   으로는 항상 중앙에 고정돼 보여서(이동이 카메라로 상쇄됨) 제자리
+   회전처럼 보인다. 걷는 원의 반지름이 크지 않아 화면 밖으로 나갈
+   일이 없으므로, 타겟은 원점에 고정해 실제 이동이 보이게 한다.
    yaw/pitch/dist(구면 좌표)를 마우스로 바꾸고 매 프레임 직교 좌표로
    환산해 gluLookAt에 넘긴다. ---- */
 static double cam_yaw = 45.0;    /* degrees, y축 둘레 회전 */
@@ -252,6 +263,9 @@ static void display(void) {
     }
 
     glPushMatrix();
+        glTranslated(body_x, 0.0, body_z);   /* 몸통의 월드 위치 (ROOT) */
+        glRotated(body_heading, 0, 1, 0);    /* 몸통의 방향 (ROOT) */
+
         glTranslated(0.0, BODY_H / 2.0, 0.0);      /* body: T1 */
         draw_body();
 
@@ -299,6 +313,17 @@ static void idle(void) {
            움직여야 자연스럽다 (오른팔이 앞으로 나올 때 왼다리가 앞으로). */
         left_leg_angle = -25.0 * sin(t);
         right_leg_angle = 25.0 * sin(t);
+
+        /* 몸통도 같이 걸어간다. heading을 매 틱 += 0.3처럼 누적시키면
+           idle()이 불리는 빈도(프레임 속도)에 따라 회전 속도가 달라져서
+           - 빠른 PC에서는 눈이 어지러울 정도로 빨리 돈다. 그 대신 팔다리
+           스윙과 똑같은 t를 써서 원 궤적을 닫힌 형태로 직접 계산하면
+           프레임 속도와 무관하게 항상 같은 속도로 걷는다. */
+        double heading_r = 0.15 * t;            /* 각속도: t 단위당 라디안 */
+        const double walk_radius = 2.5;
+        body_heading = heading_r * 180.0 / CAM_PI;
+        body_x = walk_radius * (1.0 - cos(heading_r));
+        body_z = walk_radius * sin(heading_r);
     }
     glutPostRedisplay();
 }
@@ -336,6 +361,7 @@ static void keyboard(unsigned char key, int x, int y) {
         case 'r': case 'R':
             left_angle = 0.0; right_angle = 0.0;
             left_leg_angle = 0.0; right_leg_angle = 0.0;
+            body_x = 0.0; body_z = 0.0; body_heading = 0.0;
             t = 0.0;
             break;
         case 'l': case 'L':
@@ -347,6 +373,30 @@ static void keyboard(unsigned char key, int x, int y) {
             break;
         case 27: /* ESC */
             glutLeaveMainLoop();
+            break;
+    }
+    glutPostRedisplay();
+}
+
+static void special_keys(int key, int x, int y) {
+    (void)x; (void)y;
+    double heading_r = body_heading * CAM_PI / 180.0;
+    switch (key) {
+        case GLUT_KEY_UP:
+            animate = 0;
+            body_x += 0.1 * sin(heading_r);
+            body_z += 0.1 * cos(heading_r);
+            break;
+        case GLUT_KEY_DOWN:
+            animate = 0;
+            body_x -= 0.1 * sin(heading_r);
+            body_z -= 0.1 * cos(heading_r);
+            break;
+        case GLUT_KEY_LEFT:
+            animate = 0; body_heading -= 5.0;
+            break;
+        case GLUT_KEY_RIGHT:
+            animate = 0; body_heading += 5.0;
             break;
     }
     glutPostRedisplay();
@@ -372,6 +422,7 @@ int main(int argc, char** argv) {
     glutDisplayFunc(display);
     glutReshapeFunc(reshape);
     glutKeyboardFunc(keyboard);
+    glutSpecialFunc(special_keys);
     glutIdleFunc(idle);
     glutMouseFunc(mouse_button);
     glutMotionFunc(mouse_motion);

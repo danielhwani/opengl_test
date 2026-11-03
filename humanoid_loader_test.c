@@ -20,6 +20,7 @@
  * body.obj / head.obj / arm.obj / leg.obj / humanoid_scene.txt를 만들어둬야 한다.
  *
  * 조작: humanoid_test.c와 동일 (Space, Q/A, E/D, Z/X, C/V, T, L, R, ESC,
+ *       방향키 = 몸통 전진/후진/회전,
  *       마우스 왼쪽 드래그 = 카메라 궤도 회전, 마우스 휠 = 줌)
  */
 
@@ -162,6 +163,11 @@ static double left_angle = 0.0;
 static double right_angle = 0.0;
 static double left_leg_angle = 0.0;
 static double right_leg_angle = 0.0;
+/* 몸통 전체의 월드 위치/방향 - humanoid_test.c와 동일하게, 트리 전체
+   (ROOT)에 적용되는 변환이라 다른 모든 부위를 다 끌고 다닌다. */
+static double body_x = 0.0;
+static double body_z = 0.0;
+static double body_heading = 0.0; /* degrees, y축 둘레 회전 */
 static int animate = 1;
 static int lighting = 1;
 static int texturing = 1;
@@ -330,7 +336,11 @@ static void display(void) {
         glDisable(GL_TEXTURE_2D);
     }
 
-    render_children("ROOT");
+    glPushMatrix();
+        glTranslated(body_x, 0.0, body_z);   /* 몸통의 월드 위치 (ROOT) */
+        glRotated(body_heading, 0, 1, 0);    /* 몸통의 방향 (ROOT) */
+        render_children("ROOT");
+    glPopMatrix();
 
     glDisable(GL_TEXTURE_2D);
 
@@ -344,6 +354,17 @@ static void idle(void) {
         right_angle = -35.0 * sin(t);
         left_leg_angle = -25.0 * sin(t);
         right_leg_angle = 25.0 * sin(t);
+
+        /* 몸통도 같이 걸어간다. heading을 매 틱 += 상수로 누적시키면
+           idle()이 불리는 빈도(프레임 속도)에 따라 회전 속도가 달라져서
+           - 빠른 PC에서는 눈이 어지러울 정도로 빨리 돈다. 그 대신 팔다리
+           스윙과 똑같은 t를 써서 원 궤적을 닫힌 형태로 직접 계산하면
+           프레임 속도와 무관하게 항상 같은 속도로 걷는다. */
+        double heading_r = 0.15 * t;            /* 각속도: t 단위당 라디안 */
+        const double walk_radius = 2.5;
+        body_heading = heading_r * 180.0 / CAM_PI;
+        body_x = walk_radius * (1.0 - cos(heading_r));
+        body_z = walk_radius * sin(heading_r);
     }
     glutPostRedisplay();
 }
@@ -381,6 +402,7 @@ static void keyboard(unsigned char key, int x, int y) {
         case 'r': case 'R':
             left_angle = 0.0; right_angle = 0.0;
             left_leg_angle = 0.0; right_leg_angle = 0.0;
+            body_x = 0.0; body_z = 0.0; body_heading = 0.0;
             t = 0.0;
             break;
         case 'l': case 'L':
@@ -392,6 +414,30 @@ static void keyboard(unsigned char key, int x, int y) {
             break;
         case 27: /* ESC */
             glutLeaveMainLoop();
+            break;
+    }
+    glutPostRedisplay();
+}
+
+static void special_keys(int key, int x, int y) {
+    (void)x; (void)y;
+    double heading_r = body_heading * CAM_PI / 180.0;
+    switch (key) {
+        case GLUT_KEY_UP:
+            animate = 0;
+            body_x += 0.1 * sin(heading_r);
+            body_z += 0.1 * cos(heading_r);
+            break;
+        case GLUT_KEY_DOWN:
+            animate = 0;
+            body_x -= 0.1 * sin(heading_r);
+            body_z -= 0.1 * cos(heading_r);
+            break;
+        case GLUT_KEY_LEFT:
+            animate = 0; body_heading -= 5.0;
+            break;
+        case GLUT_KEY_RIGHT:
+            animate = 0; body_heading += 5.0;
             break;
     }
     glutPostRedisplay();
@@ -419,6 +465,7 @@ int main(int argc, char **argv) {
     glutDisplayFunc(display);
     glutReshapeFunc(reshape);
     glutKeyboardFunc(keyboard);
+    glutSpecialFunc(special_keys);
     glutIdleFunc(idle);
     glutMouseFunc(mouse_button);
     glutMotionFunc(mouse_motion);
