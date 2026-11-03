@@ -22,6 +22,11 @@
  * 조작: humanoid_test.c와 동일 (Space, Q/A, E/D, Z/X, C/V, T, L, R, ESC,
  *       방향키 = 몸통 전진/후진/회전,
  *       마우스 왼쪽 드래그 = 카메라 궤도 회전, 마우스 휠 = 줌)
+ *
+ * 자동 애니메이션일 때 몸통은 humanoid_path.txt에 적힌 웨이포인트
+ * ("x z" 한 줄씩, 마지막 점에서 첫 점으로 돌아와 폐곡선을 이룸)를
+ * Catmull-Rom 스플라인으로 부드럽게 이어 따라 걷는다. 파일이 없으면
+ * 기본 사각형 경로를 쓴다.
  */
 
 #include <GL/freeglut.h>
@@ -173,6 +178,118 @@ static int lighting = 1;
 static int texturing = 1;
 static GLuint texture_id = 0;
 
+/* 얼굴 코 표시용 - head.obj 생성 시 쓴 반지름(gen_humanoid_assets.c의
+   HEAD_R)과 맞춰야 코가 얼굴 표면에 딱 붙는다. */
+#define HEAD_R 0.35
+
+/* ---- 경로(path): humanoid_test.c와 동일. humanoid_path.txt에서 읽은
+   웨이포인트(x z)를 순서대로 잇는 폐곡선을 Catmull-Rom 스플라인으로
+   부드럽게 따라 걷는다. 파일이 없으면 기본 사각형 경로를 쓴다. ---- */
+#define MAX_WAYPOINTS 64
+static double path_x[MAX_WAYPOINTS];
+static double path_z[MAX_WAYPOINTS];
+static double path_seg_len[MAX_WAYPOINTS]; /* i번 구간: path[i] -> path[(i+1)%path_count] */
+static int path_count = 0;
+static double path_total_len = 0.0;
+
+static void load_default_path(void) {
+    static const double defx[] = {-2.0, 2.0, 2.0, -2.0};
+    static const double defz[] = {-1.5, -1.5, 1.5, 1.5};
+    path_count = 4;
+    for (int i = 0; i < path_count; i++) { path_x[i] = defx[i]; path_z[i] = defz[i]; }
+}
+
+static void load_path(const char *filename) {
+    FILE *f = fopen(filename, "r");
+    if (!f) {
+        fprintf(stderr, "경로 파일을 열 수 없어 기본 사각형 경로를 사용합니다: %s\n", filename);
+        load_default_path();
+    } else {
+        path_count = 0;
+        char line[128];
+        while (fgets(line, sizeof(line), f) && path_count < MAX_WAYPOINTS) {
+            if (line[0] == '#' || line[0] == '\n' || line[0] == '\r') continue;
+            double x, z;
+            if (sscanf(line, "%lf %lf", &x, &z) == 2) {
+                path_x[path_count] = x;
+                path_z[path_count] = z;
+                path_count++;
+            }
+        }
+        fclose(f);
+        if (path_count < 2) {
+            fprintf(stderr, "경로 파일에 점이 2개 미만입니다. 기본 사각형 경로를 사용합니다.\n");
+            load_default_path();
+        }
+    }
+
+    path_total_len = 0.0;
+    for (int i = 0; i < path_count; i++) {
+        int j = (i + 1) % path_count;
+        double dx = path_x[j] - path_x[i];
+        double dz = path_z[j] - path_z[i];
+        path_seg_len[i] = sqrt(dx * dx + dz * dz);
+        path_total_len += path_seg_len[i];
+    }
+}
+
+/* Catmull-Rom 스플라인: 직선 보간 대신 앞뒤 두 점(p0,p3)까지 참고해
+   부드러운 곡선을 그린다. 접선(out_tx/out_tz)이 그 지점의 진행 방향. */
+static void catmull_rom(double p0x, double p0z, double p1x, double p1z,
+                         double p2x, double p2z, double p3x, double p3z,
+                         double frac, double *out_x, double *out_z,
+                         double *out_tx, double *out_tz) {
+    double t2 = frac * frac, t3 = t2 * frac;
+    *out_x = 0.5 * ((2.0 * p1x) + (-p0x + p2x) * frac
+             + (2.0 * p0x - 5.0 * p1x + 4.0 * p2x - p3x) * t2
+             + (-p0x + 3.0 * p1x - 3.0 * p2x + p3x) * t3);
+    *out_z = 0.5 * ((2.0 * p1z) + (-p0z + p2z) * frac
+             + (2.0 * p0z - 5.0 * p1z + 4.0 * p2z - p3z) * t2
+             + (-p0z + 3.0 * p1z - 3.0 * p2z + p3z) * t3);
+    *out_tx = 0.5 * ((-p0x + p2x) + 2.0 * (2.0 * p0x - 5.0 * p1x + 4.0 * p2x - p3x) * frac
+              + 3.0 * (-p0x + 3.0 * p1x - 3.0 * p2x + p3x) * t2);
+    *out_tz = 0.5 * ((-p0z + p2z) + 2.0 * (2.0 * p0z - 5.0 * p1z + 4.0 * p2z - p3z) * frac
+              + 3.0 * (-p0z + 3.0 * p1z - 3.0 * p2z + p3z) * t2);
+}
+
+/* 경로를 따라 s만큼 이동한 지점의 위치/방향을 계산한다 (s는 경로
+   시작점부터의 누적 거리, path_total_len을 넘으면 처음부터 다시 돈다) */
+static void path_sample(double s, double *out_x, double *out_z, double *out_heading_deg) {
+    if (path_count < 2 || path_total_len <= 0.0) {
+        *out_x = 0.0; *out_z = 0.0; *out_heading_deg = 0.0;
+        return;
+    }
+    s = fmod(s, path_total_len);
+    if (s < 0.0) s += path_total_len;
+
+    int i = 0;
+    while (i < path_count - 1 && s > path_seg_len[i]) {
+        s -= path_seg_len[i];
+        i++;
+    }
+
+    int im1 = (i - 1 + path_count) % path_count;
+    int j = (i + 1) % path_count;
+    int jp1 = (i + 2) % path_count;
+    double seg = path_seg_len[i];
+    double frac = (seg > 1e-9) ? (s / seg) : 0.0;
+
+    double px, pz, tx, tz;
+    catmull_rom(path_x[im1], path_z[im1], path_x[i], path_z[i],
+                path_x[j], path_z[j], path_x[jp1], path_z[jp1],
+                frac, &px, &pz, &tx, &tz);
+
+    *out_x = px;
+    *out_z = pz;
+    if (fabs(tx) > 1e-9 || fabs(tz) > 1e-9) {
+        *out_heading_deg = atan2(tx, tz) * 180.0 / CAM_PI;
+    } else {
+        double dx = path_x[j] - path_x[i];
+        double dz = path_z[j] - path_z[i];
+        *out_heading_deg = atan2(dx, dz) * 180.0 / CAM_PI;
+    }
+}
+
 /* teapot_test.c/humanoid_test.c와 동일한 체커 텍스처 - object-linear
    GL_TEXTURE_GEN을 쓰므로, OBJ 로더가 텍스처 좌표(vt)를 읽지 않아도
    텍스처가 자동으로 입혀진다. */
@@ -225,6 +342,16 @@ static void render_children(const char *parent_name) {
         glColor3f(p->color[0], p->color[1], p->color[2]);
         draw_mesh(p->mesh_index);
 
+        if (strcmp(p->name, "Head") == 0) {
+            /* 코: 머리 앞쪽(+Z)에 작은 돌출부를 붙여 앞/뒤를 구별한다.
+               humanoid_test.c의 draw_head()와 동일한 원리. */
+            glPushMatrix();
+            glColor3f(0.85f, 0.25f, 0.25f);
+            glTranslated(0.0, HEAD_R, HEAD_R * 0.85);
+            glutSolidSphere(HEAD_R * 0.28, 12, 12);
+            glPopMatrix();
+        }
+
         render_children(p->name); /* 이 부위를 부모로 둔 자식들 */
 
         glPopMatrix();
@@ -269,7 +396,7 @@ static void init_gl(void) {
    환산해 gluLookAt에 넘긴다. ---- */
 static double cam_yaw = 45.0;    /* degrees, y축 둘레 회전 */
 static double cam_pitch = 21.0;  /* degrees, -89..89로 클램프 (gimbal lock 방지) */
-static double cam_dist = 6.0;
+static double cam_dist = 10.0;
 #define CAM_TARGET_Y 0.9
 static int mouse_dragging = 0;
 static int last_mouse_x = 0, last_mouse_y = 0;
@@ -355,16 +482,11 @@ static void idle(void) {
         left_leg_angle = -25.0 * sin(t);
         right_leg_angle = 25.0 * sin(t);
 
-        /* 몸통도 같이 걸어간다. heading을 매 틱 += 상수로 누적시키면
-           idle()이 불리는 빈도(프레임 속도)에 따라 회전 속도가 달라져서
-           - 빠른 PC에서는 눈이 어지러울 정도로 빨리 돈다. 그 대신 팔다리
-           스윙과 똑같은 t를 써서 원 궤적을 닫힌 형태로 직접 계산하면
-           프레임 속도와 무관하게 항상 같은 속도로 걷는다. */
-        double heading_r = 0.15 * t;            /* 각속도: t 단위당 라디안 */
-        const double walk_radius = 2.5;
-        body_heading = heading_r * 180.0 / CAM_PI;
-        body_x = walk_radius * (1.0 - cos(heading_r));
-        body_z = walk_radius * sin(heading_r);
+        /* 몸통도 같이 걸어간다: humanoid_path.txt의 웨이포인트를 잇는
+           폐곡선을 따라, 이동 거리(s)를 t에 비례시켜 구한다. 매 틱
+           고정값을 누적시키지 않고 t로부터 직접 계산하므로(path_sample),
+           idle() 호출 빈도(프레임 속도)와 무관하게 항상 같은 속도로 걷는다. */
+        path_sample(0.6 * t, &body_x, &body_z, &body_heading);
     }
     glutPostRedisplay();
 }
@@ -453,6 +575,7 @@ static void reshape(int w, int h) {
 }
 
 int main(int argc, char **argv) {
+    load_path("humanoid_path.txt");
     load_scene("humanoid_scene.txt");
 
     glutInit(&argc, argv);
