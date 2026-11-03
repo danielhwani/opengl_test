@@ -22,8 +22,8 @@
 | 키 | 기능 | 대상 |
 |---|---|---|
 | Space | 와이어프레임/솔리드 토글 (teapot) · 자동 애니메이션 on/off (humanoid) | 공통 |
-| T | 텍스처 on/off | teapot |
-| L | 조명 on/off | teapot |
+| T | 텍스처 on/off | 공통 |
+| L | 조명 on/off | 공통 |
 | Q / A | 왼팔 각도 수동 증가/감소 | humanoid |
 | E / D | 오른팔 각도 수동 증가/감소 | humanoid |
 | Z / X | 왼다리 각도 수동 증가/감소 | humanoid |
@@ -183,3 +183,7 @@ RightLeg   leg.obj    Body    0.2500   -0.7000   0.0  ROTX   0.35  0.35  0.45
 - OBJ 로더는 최소 구현이라 `v`/`vn`/`f`(포맷 `f v//vn v//vn v//vn`)만
   지원하고 텍스처 좌표(`vt`)는 읽지 않는다. `gen_humanoid_assets.c`가
   항상 이 포맷으로만 저장하므로 두 프로그램 사이에서는 문제없다.
+- humanoid 예제(하드코딩 버전 + OBJ 로더 버전) 둘 다 teapot과 같은
+  체커 텍스처 + `GL_TEXTURE_GEN_S/T`를 그대로 재사용한다. `glutSolidCube`/
+  `glutSolidSphere`도, OBJ 로더가 읽은 메시도 텍스처 좌표가 없는 건
+  동일하므로 같은 해법이 그대로 통한다.

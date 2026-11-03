@@ -36,6 +36,8 @@
  *   E / D      : 오른팔 각도 직접 조정
  *   Z / X      : 왼다리 각도 직접 조정
  *   C / V      : 오른다리 각도 직접 조정
+ *   T          : 텍스처 on/off
+ *   L          : 조명 on/off
  *   R          : 각도 초기화
  *   ESC        : 종료
  */
@@ -67,6 +69,38 @@ static double right_angle = 0.0;
 static double left_leg_angle = 0.0;
 static double right_leg_angle = 0.0;
 static int animate = 1;
+static int lighting = 1;
+static int texturing = 1;
+static GLuint texture_id = 0;
+
+/* teapot_test.c와 동일한 체커 텍스처 - object-linear GL_TEXTURE_GEN을
+   쓰므로 glutSolidCube/glutSolidSphere처럼 텍스처 좌표를 안 만들어주는
+   도형에도 텍스처 좌표가 자동으로 생긴다. */
+#define TEX_SIZE 64
+#define TEX_SQUARES 8
+
+static void create_checker_texture(void) {
+    static unsigned char checker[TEX_SIZE][TEX_SIZE][3];
+    int step = TEX_SIZE / TEX_SQUARES;
+    for (int i = 0; i < TEX_SIZE; i++) {
+        for (int j = 0; j < TEX_SIZE; j++) {
+            if (((i / step) + (j / step)) % 2 == 0) {
+                checker[i][j][0] = 230; checker[i][j][1] = 230; checker[i][j][2] = 230;
+            } else {
+                checker[i][j][0] = 40; checker[i][j][1] = 60; checker[i][j][2] = 120;
+            }
+        }
+    }
+
+    glGenTextures(1, &texture_id);
+    glBindTexture(GL_TEXTURE_2D, texture_id);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, TEX_SIZE, TEX_SIZE, 0,
+                 GL_RGB, GL_UNSIGNED_BYTE, checker);
+}
 
 static void init_gl(void) {
     glEnable(GL_DEPTH_TEST);
@@ -84,6 +118,19 @@ static void init_gl(void) {
     glEnable(GL_COLOR_MATERIAL);
     glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
     glEnable(GL_NORMALIZE);
+
+    create_checker_texture();
+
+    glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_OBJECT_LINEAR);
+    glTexGeni(GL_T, GL_TEXTURE_GEN_MODE, GL_OBJECT_LINEAR);
+    GLfloat plane_s[] = {1.0f, 0.0f, 0.0f, 0.0f};
+    GLfloat plane_t[] = {0.0f, 0.0f, 1.0f, 0.0f};
+    glTexGenfv(GL_S, GL_OBJECT_PLANE, plane_s);
+    glTexGenfv(GL_T, GL_OBJECT_PLANE, plane_t);
+    glEnable(GL_TEXTURE_GEN_S);
+    glEnable(GL_TEXTURE_GEN_T);
+
+    glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 }
 
 static void draw_axes(double length) {
@@ -93,7 +140,7 @@ static void draw_axes(double length) {
         glColor3f(0, 1, 0); glVertex3d(0, 0, 0); glVertex3d(0, length, 0);
         glColor3f(0, 0, 1); glVertex3d(0, 0, 0); glVertex3d(0, 0, length);
     glEnd();
-    glEnable(GL_LIGHTING);
+    if (lighting) glEnable(GL_LIGHTING);
 }
 
 /* 몸통: 현재 원점을 중심으로 한 상자 */
@@ -145,6 +192,13 @@ static void display(void) {
 
     draw_axes(1.0);
 
+    if (texturing) {
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, texture_id);
+    } else {
+        glDisable(GL_TEXTURE_2D);
+    }
+
     glPushMatrix();
         glTranslated(0.0, BODY_H / 2.0, 0.0);      /* body: T1 */
         draw_body();
@@ -178,6 +232,8 @@ static void display(void) {
             glPopMatrix();                            /* -> T1*T3 복귀 (R4 제거) */
         glPopMatrix();                                /* -> T1 복귀 (legs 변환 제거) */
     glPopMatrix();                                   /* -> 원점 복귀 (body 변환 제거) */
+
+    glDisable(GL_TEXTURE_2D);
 
     glutSwapBuffers();
 }
@@ -229,6 +285,13 @@ static void keyboard(unsigned char key, int x, int y) {
             left_angle = 0.0; right_angle = 0.0;
             left_leg_angle = 0.0; right_leg_angle = 0.0;
             t = 0.0;
+            break;
+        case 'l': case 'L':
+            lighting = !lighting;
+            if (lighting) glEnable(GL_LIGHTING); else glDisable(GL_LIGHTING);
+            break;
+        case 't': case 'T':
+            texturing = !texturing;
             break;
         case 27: /* ESC */
             glutLeaveMainLoop();

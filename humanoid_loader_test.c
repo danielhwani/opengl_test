@@ -19,7 +19,7 @@
  * 실행 전에 gen_humanoid_assets.exe를 먼저 실행해서
  * body.obj / head.obj / arm.obj / leg.obj / humanoid_scene.txt를 만들어둬야 한다.
  *
- * 조작: humanoid_test.c와 동일 (Space, Q/A, E/D, Z/X, C/V, R, ESC)
+ * 조작: humanoid_test.c와 동일 (Space, Q/A, E/D, Z/X, C/V, T, L, R, ESC)
  */
 
 #include <GL/freeglut.h>
@@ -160,6 +160,38 @@ static double right_angle = 0.0;
 static double left_leg_angle = 0.0;
 static double right_leg_angle = 0.0;
 static int animate = 1;
+static int lighting = 1;
+static int texturing = 1;
+static GLuint texture_id = 0;
+
+/* teapot_test.c/humanoid_test.c와 동일한 체커 텍스처 - object-linear
+   GL_TEXTURE_GEN을 쓰므로, OBJ 로더가 텍스처 좌표(vt)를 읽지 않아도
+   텍스처가 자동으로 입혀진다. */
+#define TEX_SIZE 64
+#define TEX_SQUARES 8
+
+static void create_checker_texture(void) {
+    static unsigned char checker[TEX_SIZE][TEX_SIZE][3];
+    int step = TEX_SIZE / TEX_SQUARES;
+    for (int i = 0; i < TEX_SIZE; i++) {
+        for (int j = 0; j < TEX_SIZE; j++) {
+            if (((i / step) + (j / step)) % 2 == 0) {
+                checker[i][j][0] = 230; checker[i][j][1] = 230; checker[i][j][2] = 230;
+            } else {
+                checker[i][j][0] = 40; checker[i][j][1] = 60; checker[i][j][2] = 120;
+            }
+        }
+    }
+
+    glGenTextures(1, &texture_id);
+    glBindTexture(GL_TEXTURE_2D, texture_id);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, TEX_SIZE, TEX_SIZE, 0,
+                 GL_RGB, GL_UNSIGNED_BYTE, checker);
+}
 
 static double angle_for_part(const char *name) {
     if (strcmp(name, "LeftArm") == 0) return left_angle;
@@ -208,6 +240,19 @@ static void init_gl(void) {
     glEnable(GL_COLOR_MATERIAL);
     glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
     glEnable(GL_NORMALIZE);
+
+    create_checker_texture();
+
+    glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_OBJECT_LINEAR);
+    glTexGeni(GL_T, GL_TEXTURE_GEN_MODE, GL_OBJECT_LINEAR);
+    GLfloat plane_s[] = {1.0f, 0.0f, 0.0f, 0.0f};
+    GLfloat plane_t[] = {0.0f, 0.0f, 1.0f, 0.0f};
+    glTexGenfv(GL_S, GL_OBJECT_PLANE, plane_s);
+    glTexGenfv(GL_T, GL_OBJECT_PLANE, plane_t);
+    glEnable(GL_TEXTURE_GEN_S);
+    glEnable(GL_TEXTURE_GEN_T);
+
+    glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 }
 
 static void draw_axes(double length) {
@@ -217,7 +262,7 @@ static void draw_axes(double length) {
         glColor3f(0, 1, 0); glVertex3d(0, 0, 0); glVertex3d(0, length, 0);
         glColor3f(0, 0, 1); glVertex3d(0, 0, 0); glVertex3d(0, 0, length);
     glEnd();
-    glEnable(GL_LIGHTING);
+    if (lighting) glEnable(GL_LIGHTING);
 }
 
 static void display(void) {
@@ -227,7 +272,16 @@ static void display(void) {
 
     draw_axes(1.0);
 
+    if (texturing) {
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, texture_id);
+    } else {
+        glDisable(GL_TEXTURE_2D);
+    }
+
     render_children("ROOT");
+
+    glDisable(GL_TEXTURE_2D);
 
     glutSwapBuffers();
 }
@@ -277,6 +331,13 @@ static void keyboard(unsigned char key, int x, int y) {
             left_angle = 0.0; right_angle = 0.0;
             left_leg_angle = 0.0; right_leg_angle = 0.0;
             t = 0.0;
+            break;
+        case 'l': case 'L':
+            lighting = !lighting;
+            if (lighting) glEnable(GL_LIGHTING); else glDisable(GL_LIGHTING);
+            break;
+        case 't': case 'T':
+            texturing = !texturing;
             break;
         case 27: /* ESC */
             glutLeaveMainLoop();
