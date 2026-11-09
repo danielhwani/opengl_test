@@ -181,6 +181,9 @@ static GLuint texture_id = 0;
 /* 얼굴 코 표시용 - head.obj 생성 시 쓴 반지름(gen_humanoid_assets.c의
    HEAD_R)과 맞춰야 코가 얼굴 표면에 딱 붙는다. */
 #define HEAD_R 0.35
+/* ROOT가 "엉덩이" 높이라서 다리 길이(gen_humanoid_assets.c의 LEG_LEN과
+   동일)만큼 들어올려야 발이 땅(y=0)에 닿는다. */
+#define LEG_LEN 1.2
 
 /* ---- 경로(path): humanoid_test.c와 동일. humanoid_path.txt에서 읽은
    웨이포인트(x z)를 순서대로 잇는 폐곡선을 Catmull-Rom 스플라인으로
@@ -327,6 +330,11 @@ static double angle_for_part(const char *name) {
     return 0.0;
 }
 
+/* 그림자를 그리는 동안(rendering_shadow)은 부위별 색을 칠하지 않고
+   display()에서 미리 설정해둔 반투명 검은색을 유지한다.
+   humanoid_test.c와 동일한 이유. */
+static int rendering_shadow = 0;
+
 /* parent_name의 자식들을 재귀적으로 push/pop하며 그린다 (씬 파일의
    계층 정보를 그대로 따라가는, "데이터로부터 만들어진" 트리 렌더링) */
 static void render_children(const char *parent_name) {
@@ -339,14 +347,14 @@ static void render_children(const char *parent_name) {
         if (p->joint == JOINT_ROTX) {
             glRotated(angle_for_part(p->name), 1, 0, 0);
         }
-        glColor3f(p->color[0], p->color[1], p->color[2]);
+        if (!rendering_shadow) glColor3f(p->color[0], p->color[1], p->color[2]);
         draw_mesh(p->mesh_index);
 
         if (strcmp(p->name, "Head") == 0) {
             /* 코: 머리 앞쪽(+Z)에 작은 돌출부를 붙여 앞/뒤를 구별한다.
                humanoid_test.c의 draw_head()와 동일한 원리. */
             glPushMatrix();
-            glColor3f(0.85f, 0.25f, 0.25f);
+            if (!rendering_shadow) glColor3f(0.85f, 0.25f, 0.25f);
             glTranslated(0.0, HEAD_R, HEAD_R * 0.85);
             glutSolidSphere(HEAD_R * 0.28, 12, 12);
             glPopMatrix();
@@ -356,6 +364,72 @@ static void render_children(const char *parent_name) {
 
         glPopMatrix();
     }
+}
+
+/* 광원 위치(LIGHT_X/Y/Z, init_gl()의 GL_LIGHT0과 동일)와 같은 좌표를
+   평행광 방향으로 취급해, y에 비례해 x/z를 미리 어긋나게 하는 전단
+   (shear) 변환만으로 y=0 평면에 투영한다. 점광원 투영(perspective
+   divide)을 쓰면 광원 높이에 가까운 부위(머리)의 그림자가 무한히
+   늘어나 카메라 절두체에서 잘려 보이는 문제가 있어 humanoid_test.c와
+   동일하게 전단 변환으로 바꿨다. */
+#define LIGHT_X 3.0
+#define LIGHT_Y 4.0
+#define LIGHT_Z 5.0
+
+static void apply_shadow_matrix(double lx, double ly, double lz) {
+    GLdouble m[16] = {
+        1.0,     0.0, 0.0, 0.0,
+        -lx/ly,  0.0, -lz/ly, 0.0,
+        0.0,     0.0, 1.0, 0.0,
+        0.0,     0.0, 0.0, 1.0
+    };
+    glMultMatrixd(m);
+}
+
+/* 하늘: humanoid_test.c와 동일한 화면 전체 그라디언트. */
+static void draw_sky(void) {
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_LIGHTING);
+    glDisable(GL_TEXTURE_2D);
+
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    gluOrtho2D(0.0, 1.0, 0.0, 1.0);
+
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    glBegin(GL_QUADS);
+        glColor3f(0.35f, 0.55f, 0.85f); glVertex2d(0.0, 1.0);
+        glColor3f(0.35f, 0.55f, 0.85f); glVertex2d(1.0, 1.0);
+        glColor3f(0.80f, 0.88f, 0.95f); glVertex2d(1.0, 0.0);
+        glColor3f(0.80f, 0.88f, 0.95f); glVertex2d(0.0, 0.0);
+    glEnd();
+
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+
+    glEnable(GL_DEPTH_TEST);
+    if (lighting) glEnable(GL_LIGHTING);
+}
+
+/* 땅: humanoid_test.c와 동일, 흙색 큰 사각형. */
+#define GROUND_HALF 20.0
+#define GROUND_Y -0.01
+
+static void draw_ground(void) {
+    glColor3f(0.42f, 0.30f, 0.18f);
+    glNormal3d(0.0, 1.0, 0.0);
+    glBegin(GL_QUADS);
+        glVertex3d(-GROUND_HALF, GROUND_Y, -GROUND_HALF);
+        glVertex3d( GROUND_HALF, GROUND_Y, -GROUND_HALF);
+        glVertex3d( GROUND_HALF, GROUND_Y,  GROUND_HALF);
+        glVertex3d(-GROUND_HALF, GROUND_Y,  GROUND_HALF);
+    glEnd();
 }
 
 /* ---------------- OpenGL 보일러플레이트 ---------------- */
@@ -449,8 +523,19 @@ static void draw_axes(double length) {
     if (lighting) glEnable(GL_LIGHTING);
 }
 
+/* ROOT 변환 + 전체 트리를 그린다. 그림자 패스에서도 재사용하기 위해
+   분리해뒀다. ROOT는 "엉덩이" 높이라 LEG_LEN만큼 들어올려야 발이
+   땅(y=0)에 닿는다 (humanoid_test.c의 draw_humanoid_body()와 동일). */
+static void draw_humanoid_root(void) {
+    glTranslated(body_x, LEG_LEN, body_z); /* 몸통의 월드 위치 (ROOT) */
+    glRotated(body_heading, 0, 1, 0);      /* 몸통의 방향 (ROOT) */
+    render_children("ROOT");
+}
+
 static void display(void) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    draw_sky();
+
     glLoadIdentity();
     apply_camera();
 
@@ -462,11 +547,35 @@ static void display(void) {
     } else {
         glDisable(GL_TEXTURE_2D);
     }
+    draw_ground();
+
+    /* 그림자 패스: humanoid_test.c와 동일 - 조명/텍스처를 끄고 반투명
+       검은색으로, 전단 변환을 곱한 채로 트리를 한 번 더 그린다. */
+    rendering_shadow = 1;
+    glDisable(GL_LIGHTING);
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_FALSE);
+    glColor4f(0.0f, 0.0f, 0.0f, 0.35f);
+    glPushMatrix();
+        apply_shadow_matrix(LIGHT_X, LIGHT_Y, LIGHT_Z);
+        draw_humanoid_root();
+    glPopMatrix();
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+    rendering_shadow = 0;
+    if (lighting) glEnable(GL_LIGHTING);
+
+    if (texturing) {
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, texture_id);
+    } else {
+        glDisable(GL_TEXTURE_2D);
+    }
 
     glPushMatrix();
-        glTranslated(body_x, 0.0, body_z);   /* 몸통의 월드 위치 (ROOT) */
-        glRotated(body_heading, 0, 1, 0);    /* 몸통의 방향 (ROOT) */
-        render_children("ROOT");
+        draw_humanoid_root();
     glPopMatrix();
 
     glDisable(GL_TEXTURE_2D);

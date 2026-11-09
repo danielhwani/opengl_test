@@ -325,10 +325,17 @@ static void draw_axes(double length) {
     if (lighting) glEnable(GL_LIGHTING);
 }
 
+/* 그림자를 그리는 동안(rendering_shadow)은 각 부위가 자기 색을 칠하면
+   안 된다 - 그림자는 display()에서 미리 glColor4f로 설정해둔 반투명
+   검은색을 그대로 유지해야 하기 때문. 조명이 꺼진 상태라 glColor는
+   lighting 여부와 무관하게 바로 화면색이 되므로, 부위별 glColor3f를
+   그냥 두면 그림자가 몸 색 그대로 투영돼버린다. */
+static int rendering_shadow = 0;
+
 /* 몸통: 현재 원점을 중심으로 한 상자 */
 static void draw_body(void) {
     glPushMatrix();
-    glColor3f(0.55f, 0.55f, 0.65f);
+    if (!rendering_shadow) glColor3f(0.55f, 0.55f, 0.65f);
     glScaled(BODY_W, BODY_H, BODY_D);
     glutSolidCube(1.0);
     glPopMatrix();
@@ -340,11 +347,11 @@ static void draw_body(void) {
    코도 그 축 위에 놓아야 실제로 "앞"을 가리킨다. */
 static void draw_head(void) {
     glPushMatrix();
-    glColor3f(0.85f, 0.75f, 0.65f);
+    if (!rendering_shadow) glColor3f(0.85f, 0.75f, 0.65f);
     glTranslated(0.0, HEAD_R, 0.0);
     glutSolidSphere(HEAD_R, 24, 24);
 
-    glColor3f(0.85f, 0.25f, 0.25f);
+    if (!rendering_shadow) glColor3f(0.85f, 0.25f, 0.25f);
     glTranslated(0.0, 0.0, HEAD_R * 0.85);
     glutSolidSphere(HEAD_R * 0.28, 12, 12);
 
@@ -357,7 +364,7 @@ static void draw_head(void) {
    먼저 적용해도 어깨 지점이 정확히 회전축이 된다. */
 static void draw_arm(double side_x) {
     glPushMatrix();
-    glColor3f(0.45f, 0.45f, 0.55f);
+    if (!rendering_shadow) glColor3f(0.45f, 0.45f, 0.55f);
     glTranslated(side_x, -ARM_LEN / 2.0, 0.0);
     glScaled(ARM_W, ARM_LEN, ARM_D);
     glutSolidCube(1.0);
@@ -368,15 +375,138 @@ static void draw_arm(double side_x) {
    x축 회전이 그대로 엉덩이 관절 회전이 된다. */
 static void draw_leg(double side_x) {
     glPushMatrix();
-    glColor3f(0.35f, 0.35f, 0.45f);
+    if (!rendering_shadow) glColor3f(0.35f, 0.35f, 0.45f);
     glTranslated(side_x, -LEG_LEN / 2.0, 0.0);
     glScaled(LEG_W, LEG_LEN, LEG_D);
     glutSolidCube(1.0);
     glPopMatrix();
 }
 
+/* 트리 전체(ROOT 변환 + body/head/arms/legs)를 그린다. display()에서
+   분리해둔 이유는 그림자 렌더링에도 똑같이 재사용하기 위해서다 -
+   그림자는 이 함수를 "광원 기준 y=0 투영 행렬"을 미리 곱해둔 상태로
+   한 번 더 호출해서 만든다(아래 apply_shadow_matrix). */
+static void draw_humanoid_body(void) {
+    /* ROOT 자체가 "엉덩이" 높이라서, y를 0으로 두면 다리(LEG_LEN)가
+       그대로 땅(y=0) 밑으로 파고든다. 발이 땅에 닿도록 ROOT를
+       LEG_LEN만큼 들어올린다. */
+    glTranslated(body_x, LEG_LEN, body_z);   /* 몸통의 월드 위치 (ROOT) */
+    glRotated(body_heading, 0, 1, 0);    /* 몸통의 방향 (ROOT) */
+
+    glTranslated(0.0, BODY_H / 2.0, 0.0);      /* body: T1 */
+    draw_body();
+
+    glPushMatrix();
+        glTranslated(0.0, BODY_H / 2.0, 0.0);  /* head: T1*T2 */
+        draw_head();
+
+        glPushMatrix();
+            glRotated(left_angle, 1, 0, 0);    /* left_arm: T1*T2*R1 */
+            draw_arm(-SHOULDER_X);
+        glPopMatrix();                          /* -> T1*T2 복귀 (R1 제거) */
+
+        glPushMatrix();
+            glRotated(right_angle, 1, 0, 0);   /* right_arm: T1*T2*R2 (R1 영향 없음) */
+            draw_arm(SHOULDER_X);
+        glPopMatrix();                          /* -> T1*T2 복귀 (R2 제거) */
+    glPopMatrix();                              /* -> T1 복귀 (head 변환 제거) */
+
+    glPushMatrix();
+        glTranslated(0.0, -BODY_H / 2.0, 0.0); /* legs: T1*T3 (T3 = 몸통 바닥) */
+
+        glPushMatrix();
+            glRotated(left_leg_angle, 1, 0, 0);  /* left_leg: T1*T3*R3 */
+            draw_leg(-HIP_X);
+        glPopMatrix();                            /* -> T1*T3 복귀 (R3 제거) */
+
+        glPushMatrix();
+            glRotated(right_leg_angle, 1, 0, 0); /* right_leg: T1*T3*R4 (R3 영향 없음) */
+            draw_leg(HIP_X);
+        glPopMatrix();                            /* -> T1*T3 복귀 (R4 제거) */
+    glPopMatrix();                                /* -> T1 복귀 (legs 변환 제거) */
+}
+
+/* ---- 그림자: 평행광(directional light) 가정의 전단(shear) 투영 ----
+   점광원 위치를 기준으로 진짜 투영(perspective divide, w가 0에 가까워짐)
+   행렬을 쓰면 머리처럼 광원 높이(LIGHT_Y)에 가까워지는 부위의 그림자가
+   무한히 늘어나면서 카메라 절두체 경계에서 잘려 보이는 문제가 있었다
+   (화면 위쪽이 잘리는 현상). 대신 광원을 "방향"으로만 취급해 높이(y)에
+   비례해 x/z를 미리 어긋나게 하는 전단 변환만 쓰면 w가 항상 1로
+   유지되어 그런 클리핑이 생기지 않는다 - 점광원처럼 정확하진 않지만
+   이 데모에서는 방향만 맞으면 충분하다. */
+#define LIGHT_X 3.0
+#define LIGHT_Y 4.0
+#define LIGHT_Z 5.0
+
+static void apply_shadow_matrix(double lx, double ly, double lz) {
+    GLdouble m[16] = {
+        1.0,     0.0, 0.0, 0.0,
+        -lx/ly,  0.0, -lz/ly, 0.0,
+        0.0,     0.0, 1.0, 0.0,
+        0.0,     0.0, 0.0, 1.0
+    };
+    glMultMatrixd(m);
+}
+
+/* ---- 하늘: 화면 전체를 덮는 2D 사각형에 위/아래 색을 다르게 줘서
+   생기는 그라디언트. 3D 장면을 그리기 전에, 깊이 테스트/조명을 끈
+   채 별도의 직교(ortho) 투영으로 그리고 나서 원래 투영/모델뷰
+   행렬로 복귀한다 - 그래야 뒤에 이어지는 3D 카메라 설정에 영향을
+   주지 않는다. glClearColor 한 가지 색보다 하늘-지평선 그라디언트가
+   훨씬 "배경"처럼 보인다. ---- */
+static void draw_sky(void) {
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_LIGHTING);
+    glDisable(GL_TEXTURE_2D);
+
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    gluOrtho2D(0.0, 1.0, 0.0, 1.0);
+
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    glBegin(GL_QUADS);
+        glColor3f(0.35f, 0.55f, 0.85f); glVertex2d(0.0, 1.0); /* 위: 하늘색 */
+        glColor3f(0.35f, 0.55f, 0.85f); glVertex2d(1.0, 1.0);
+        glColor3f(0.80f, 0.88f, 0.95f); glVertex2d(1.0, 0.0); /* 아래: 지평선 근처, 더 밝게 */
+        glColor3f(0.80f, 0.88f, 0.95f); glVertex2d(0.0, 0.0);
+    glEnd();
+
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+
+    glEnable(GL_DEPTH_TEST);
+    if (lighting) glEnable(GL_LIGHTING);
+}
+
+/* ---- 땅: 원점 근처를 덮는 큰 사각형(y=GROUND_Y, 거의 0이지만 살짝
+   아래로 둬서 그림자가 투영되는 y=0 평면과 z-fighting이 안 나게
+   한다). texturing이 켜져 있으면 체커 텍스처가 그대로 타일링돼서
+   바닥 격자처럼 보인다(GL_TEXTURE_GEN이 물체 좌표 기준이라 큰
+   사각형 위에서는 자동으로 여러 번 반복된다). ---- */
+#define GROUND_HALF 20.0
+#define GROUND_Y -0.01
+
+static void draw_ground(void) {
+    glColor3f(0.42f, 0.30f, 0.18f); /* 흙색 */
+    glNormal3d(0.0, 1.0, 0.0);
+    glBegin(GL_QUADS);
+        glVertex3d(-GROUND_HALF, GROUND_Y, -GROUND_HALF);
+        glVertex3d( GROUND_HALF, GROUND_Y, -GROUND_HALF);
+        glVertex3d( GROUND_HALF, GROUND_Y,  GROUND_HALF);
+        glVertex3d(-GROUND_HALF, GROUND_Y,  GROUND_HALF);
+    glEnd();
+}
+
 static void display(void) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    draw_sky();
+
     glLoadIdentity();
     apply_camera();
 
@@ -388,43 +518,38 @@ static void display(void) {
     } else {
         glDisable(GL_TEXTURE_2D);
     }
+    draw_ground();
+
+    /* 그림자 패스: 조명/텍스처를 끄고 반투명 검은색으로, 광원 기준
+       y=0 투영 행렬을 곱한 채로 몸 전체를 한 번 더 그린다. 깊이값은
+       쓰지 않아서(glDepthMask(GL_FALSE)) 평면 위에 눌린 모양으로만
+       남고 실제 몸이나 바닥과 z-fighting을 일으키지 않는다. */
+    rendering_shadow = 1;
+    glDisable(GL_LIGHTING);
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_FALSE);
+    glColor4f(0.0f, 0.0f, 0.0f, 0.35f);
+    glPushMatrix();
+        apply_shadow_matrix(LIGHT_X, LIGHT_Y, LIGHT_Z);
+        draw_humanoid_body();
+    glPopMatrix();
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+    rendering_shadow = 0;
+    if (lighting) glEnable(GL_LIGHTING);
+
+    if (texturing) {
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, texture_id);
+    } else {
+        glDisable(GL_TEXTURE_2D);
+    }
 
     glPushMatrix();
-        glTranslated(body_x, 0.0, body_z);   /* 몸통의 월드 위치 (ROOT) */
-        glRotated(body_heading, 0, 1, 0);    /* 몸통의 방향 (ROOT) */
-
-        glTranslated(0.0, BODY_H / 2.0, 0.0);      /* body: T1 */
-        draw_body();
-
-        glPushMatrix();
-            glTranslated(0.0, BODY_H / 2.0, 0.0);  /* head: T1*T2 */
-            draw_head();
-
-            glPushMatrix();
-                glRotated(left_angle, 1, 0, 0);    /* left_arm: T1*T2*R1 */
-                draw_arm(-SHOULDER_X);
-            glPopMatrix();                          /* -> T1*T2 복귀 (R1 제거) */
-
-            glPushMatrix();
-                glRotated(right_angle, 1, 0, 0);   /* right_arm: T1*T2*R2 (R1 영향 없음) */
-                draw_arm(SHOULDER_X);
-            glPopMatrix();                          /* -> T1*T2 복귀 (R2 제거) */
-        glPopMatrix();                              /* -> T1 복귀 (head 변환 제거) */
-
-        glPushMatrix();
-            glTranslated(0.0, -BODY_H / 2.0, 0.0); /* legs: T1*T3 (T3 = 몸통 바닥) */
-
-            glPushMatrix();
-                glRotated(left_leg_angle, 1, 0, 0);  /* left_leg: T1*T3*R3 */
-                draw_leg(-HIP_X);
-            glPopMatrix();                            /* -> T1*T3 복귀 (R3 제거) */
-
-            glPushMatrix();
-                glRotated(right_leg_angle, 1, 0, 0); /* right_leg: T1*T3*R4 (R3 영향 없음) */
-                draw_leg(HIP_X);
-            glPopMatrix();                            /* -> T1*T3 복귀 (R4 제거) */
-        glPopMatrix();                                /* -> T1 복귀 (legs 변환 제거) */
-    glPopMatrix();                                   /* -> 원점 복귀 (body 변환 제거) */
+        draw_humanoid_body();
+    glPopMatrix();
 
     glDisable(GL_TEXTURE_2D);
 
