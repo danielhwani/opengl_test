@@ -174,6 +174,15 @@ static double body_x = 0.0;
 static double body_z = 0.0;
 static double body_heading = 0.0; /* degrees, y축 둘레 회전 */
 static int animate = 1;
+
+/* 4족 로봇(QUAD_ROOT 트리) 상태 - angle_for_part()가 참조하므로 그보다
+   앞에 선언해야 한다. */
+static double quad_x = 0.0;
+static double quad_heading = 90.0; /* degrees, y축 둘레 회전 */
+static double quad_fl_angle = 0.0; /* front-left */
+static double quad_fr_angle = 0.0; /* front-right */
+static double quad_bl_angle = 0.0; /* back-left */
+static double quad_br_angle = 0.0; /* back-right */
 static int lighting = 1;
 static int texturing = 1;
 static GLuint texture_id = 0;
@@ -400,6 +409,10 @@ static double angle_for_part(const char *name) {
     if (strcmp(name, "RightArm") == 0) return right_angle;
     if (strcmp(name, "LeftLeg") == 0) return left_leg_angle;
     if (strcmp(name, "RightLeg") == 0) return right_leg_angle;
+    if (strcmp(name, "QuadLegFL") == 0) return quad_fl_angle;
+    if (strcmp(name, "QuadLegFR") == 0) return quad_fr_angle;
+    if (strcmp(name, "QuadLegBL") == 0) return quad_bl_angle;
+    if (strcmp(name, "QuadLegBR") == 0) return quad_br_angle;
     return 0.0;
 }
 
@@ -586,23 +599,21 @@ static void draw_trees(void) {
     }
 }
 
-/* ---- 4족 보행 로봇: humanoid_test.c와 동일. 몸통 + 머리 + 다리 4개로,
-   humanoid와 똑같은 matrix stack 기법을 쓴다. humanoid의 걷는 경로
-   (사각형, z는 -3.5..3.5)와 겹치지 않는 z=quad_patrol_z(기본 -9, 훨씬
-   바깥쪽)에 고정해두고, 그 위에서 x축 방향으로만 왕복(patrol)한다 -
-   동선이 사람과 절대 교차하지 않는다. 걸을 때는 트롯(trot) 걸음걸이로:
-   대각선으로 마주보는 두 다리가 쌍을 이뤄 서로 반대 위상으로 흔들린다.
-   몸 색은 땅/나무처럼 texturing 토글과 분리된 단색이다. ---- */
-#define QUAD_BODY_W 0.5
-#define QUAD_BODY_L 1.2
-#define QUAD_BODY_H 0.4
-#define QUAD_HEAD_SIZE 0.3
-#define QUAD_LEG_W 0.12
-#define QUAD_LEG_LEN 0.55
-#define QUAD_LEG_D 0.12
-#define QUAD_HIP_X (QUAD_BODY_W / 2.0)
-#define QUAD_HIP_Z_FRONT (QUAD_BODY_L / 2.0 - QUAD_LEG_D / 2.0)
-#define QUAD_HIP_Z_BACK (-(QUAD_BODY_L / 2.0 - QUAD_LEG_D / 2.0))
+/* ---- 4족 보행 로봇: humanoid과 마찬가지로 OBJ + 씬 데이터 기반이다.
+   gen_humanoid_assets.c가 만든 quad_body.obj/quad_head.obj/quad_leg.obj와
+   humanoid_scene.txt에 parent가 "QUAD_ROOT"인 부분(QuadBody/QuadHead/
+   QuadLegFL/FR/BL/BR)으로 기술된 계층을 render_children("QUAD_ROOT")가
+   그대로 재귀 렌더링한다 - humanoid 쪽 render_children("ROOT")와 완전히
+   같은 함수를 이름만 다르게 불러 재사용하는 것뿐이다. 하드코딩된
+   glutSolidCube 호출은 더 이상 없다.
+
+   humanoid의 걷는 경로(사각형, z는 -3.5..3.5)와 겹치지 않는
+   z=quad_patrol_z(기본 -9, 훨씬 바깥쪽)에 고정해두고, 그 위에서 x축
+   방향으로만 왕복(patrol)한다 - 동선이 사람과 절대 교차하지 않는다.
+   걸을 때는 트롯(trot) 걸음걸이로: 대각선으로 마주보는 두 다리가
+   쌍을 이뤄 서로 반대 위상으로 흔들린다. ---- */
+#define QUAD_LEG_LEN 0.55 /* gen_humanoid_assets.c의 QUAD_LEG_LEN과 동일 -
+                             ROOT를 이만큼 들어올려야 발이 땅에 닿는다 */
 #define QUAD_TURN_SHARPNESS 6.0 /* 클수록 방향 전환 구간이 좁고 급함 */
 
 /* 왕복 경로는 humanoid_path.txt와 같은 원칙으로 하드코딩하지 않고
@@ -634,78 +645,14 @@ static void load_quad_patrol(const char *filename) {
     fclose(f);
 }
 
-static double quad_x = 0.0;
-static double quad_heading = 90.0; /* degrees, y축 둘레 회전 */
-static double quad_fl_angle = 0.0; /* front-left */
-static double quad_fr_angle = 0.0; /* front-right */
-static double quad_bl_angle = 0.0; /* back-left */
-static double quad_br_angle = 0.0; /* back-right */
-
-static void draw_quad_body(void) {
-    glPushMatrix();
-    if (!rendering_shadow) glColor3f(0.50f, 0.55f, 0.60f);
-    glScaled(QUAD_BODY_W, QUAD_BODY_H, QUAD_BODY_L);
-    glutSolidCube(1.0);
-    glPopMatrix();
-}
-
-static void draw_quad_head(void) {
-    glPushMatrix();
-    if (!rendering_shadow) glColor3f(0.60f, 0.62f, 0.65f);
-    glScaled(QUAD_HEAD_SIZE, QUAD_HEAD_SIZE, QUAD_HEAD_SIZE);
-    glutSolidCube(1.0);
-    glPopMatrix();
-}
-
-static void draw_quad_leg(void) {
-    glPushMatrix();
-    if (!rendering_shadow) glColor3f(0.35f, 0.35f, 0.40f);
-    glTranslated(0.0, -QUAD_LEG_LEN / 2.0, 0.0);
-    glScaled(QUAD_LEG_W, QUAD_LEG_LEN, QUAD_LEG_D);
-    glutSolidCube(1.0);
-    glPopMatrix();
-}
-
-/* draw_trees()처럼 자기 몫의 ROOT 변환을 내부에서 직접 push/pop으로
-   감싸서, 호출하는 쪽에서 따로 감싸지 않아도 변환이 새지 않는다. */
+/* render_children()처럼 자기 몫의 ROOT 변환을 내부에서 직접 push/pop
+   으로 감싸서, 호출하는 쪽에서 따로 감싸지 않아도 변환이 새지 않는다
+   (draw_trees()와 같은 방식). */
 static void draw_quadruped(void) {
     glPushMatrix();
         glTranslated(quad_x, QUAD_LEG_LEN, quad_patrol_z); /* ROOT: 발이 땅에 닿도록 들어올림 */
         glRotated(quad_heading, 0, 1, 0);                   /* ROOT: 이동 방향을 바라봄 */
-
-        glPushMatrix();
-            glTranslated(0.0, QUAD_BODY_H / 2.0, 0.0); /* body: T1 */
-            draw_quad_body();
-
-            glPushMatrix();
-                glTranslated(0.0, QUAD_BODY_H * 0.15, QUAD_BODY_L / 2.0 + QUAD_HEAD_SIZE * 0.45); /* head: T1*T2 */
-                draw_quad_head();
-            glPopMatrix();
-        glPopMatrix();
-
-        glPushMatrix();
-            glTranslated(-QUAD_HIP_X, 0.0, QUAD_HIP_Z_FRONT);
-            glRotated(quad_fl_angle, 1, 0, 0);
-            draw_quad_leg();
-        glPopMatrix();
-
-        glPushMatrix();
-            glTranslated(QUAD_HIP_X, 0.0, QUAD_HIP_Z_FRONT);
-            glRotated(quad_fr_angle, 1, 0, 0);
-            draw_quad_leg();
-        glPopMatrix();
-
-        glPushMatrix();
-            glTranslated(-QUAD_HIP_X, 0.0, QUAD_HIP_Z_BACK);
-            glRotated(quad_bl_angle, 1, 0, 0);
-            draw_quad_leg();
-        glPopMatrix();
-
-        glPushMatrix();
-            glTranslated(QUAD_HIP_X, 0.0, QUAD_HIP_Z_BACK);
-            glRotated(quad_br_angle, 1, 0, 0);
-            draw_quad_leg();
-        glPopMatrix();
+        render_children("QUAD_ROOT");
     glPopMatrix();
 }
 

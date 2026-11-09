@@ -155,7 +155,8 @@ cd /d/claude_test/computer_graphics
 
 gcc gen_humanoid_assets.c -o gen_humanoid_assets.exe -lm
 ./gen_humanoid_assets.exe
-# → body.obj, head.obj, arm.obj, leg.obj, humanoid_scene.txt 생성
+# → body.obj, head.obj, arm.obj, leg.obj,
+#    quad_body.obj, quad_head.obj, quad_leg.obj, humanoid_scene.txt 생성
 
 gcc humanoid_loader_test.c -o humanoid_loader_test.exe -lfreeglut -lopengl32 -lglu32 -lwinmm
 ./humanoid_loader_test.exe
@@ -392,6 +393,19 @@ push/pop 트리)을 4족 로봇에도 적용해, 사람이 걷는 장면의 배�
   더 급하게 꺾인다.
 - 몸 색도 땅/나무와 같은 이유로 texturing 토글/체커 텍스처와
   분리된 단색이다.
+- **하드코딩 vs OBJ 로더**: 처음엔 두 버전 모두 `glutSolidCube()`를
+  직접 호출하는 하드코딩 방식으로 넣었는데, "로더 버전은 사람처럼
+  OBJ 로드해서 그리고 싶다"는 요청에 따라 `humanoid_loader_test.c`
+  쪽만 데이터 기반으로 바꿨다 (`humanoid_test.c`는 원래 취지대로
+  하드코딩 버전 그대로 유지). `gen_humanoid_assets.c`가
+  `quad_body.obj`/`quad_head.obj`/`quad_leg.obj`를 만들고,
+  `humanoid_scene.txt`에 parent가 `QUAD_ROOT`인 부분들
+  (`QuadBody`/`QuadHead`/`QuadLegFL`/`FR`/`BL`/`BR`)로 그 계층을
+  기술한다. `QUAD_ROOT`는 humanoid의 `ROOT`와는 별개의 가상 부모라서,
+  `draw_quadruped()`가 `render_children("QUAD_ROOT")`를 직접 호출하며
+  순찰 위치/방향을 미리 곱해둬도 humanoid의 걷기 변환과 섞이지
+  않는다 - `render_children("ROOT")`와 완전히 같은 함수를 이름만
+  다르게 불러 재사용하는 것뿐이다.
 
 ## 구현 메모
 

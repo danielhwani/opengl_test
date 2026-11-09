@@ -35,6 +35,18 @@
 #define LEG_D 0.3
 #define HIP_X ((BODY_W - LEG_W) / 2.0)
 
+/* humanoid_test.c / humanoid_loader_test.c의 4족 로봇과 동일한 치수 */
+#define QUAD_BODY_W 0.5
+#define QUAD_BODY_L 1.2
+#define QUAD_BODY_H 0.4
+#define QUAD_HEAD_SIZE 0.3
+#define QUAD_LEG_W 0.12
+#define QUAD_LEG_LEN 0.55
+#define QUAD_LEG_D 0.12
+#define QUAD_HIP_X (QUAD_BODY_W / 2.0)
+#define QUAD_HIP_Z_FRONT (QUAD_BODY_L / 2.0 - QUAD_LEG_D / 2.0)
+#define QUAD_HIP_Z_BACK (-(QUAD_BODY_L / 2.0 - QUAD_LEG_D / 2.0))
+
 static void write_quad(FILE *f, int *vcount,
                         double p1[3], double p2[3], double p3[3], double p4[3],
                         double n[3]) {
@@ -136,6 +148,20 @@ static void write_scene(const char *filename) {
     fprintf(f, "RightArm   arm.obj    Body    %.4f     %.4f    0.0  ROTX   0.45  0.45  0.55\n", SHOULDER_X, BODY_H / 2.0);
     fprintf(f, "LeftLeg    leg.obj    Body    %.4f     %.4f    0.0  ROTX   0.35  0.35  0.45\n", -HIP_X, -BODY_H / 2.0);
     fprintf(f, "RightLeg   leg.obj    Body    %.4f     %.4f    0.0  ROTX   0.35  0.35  0.45\n", HIP_X, -BODY_H / 2.0);
+
+    /* 4족 로봇: QUAD_ROOT는 humanoid의 ROOT와는 별개의 가상 부모다.
+       humanoid_loader_test.c가 draw_quadruped()에서
+       render_children("QUAD_ROOT")를 직접 호출하면서 자기만의
+       이동/회전(순찰 위치)을 미리 곱해두기 때문에, humanoid의 걷기
+       변환과는 전혀 섞이지 않는다. */
+    fprintf(f, "QuadBody   quad_body.obj  QUAD_ROOT  0.0      %.4f    0.0  NONE   0.50  0.55  0.60\n", QUAD_BODY_H / 2.0);
+    fprintf(f, "QuadHead   quad_head.obj  QuadBody   0.0      %.4f    %.4f  NONE   0.60  0.62  0.65\n",
+            QUAD_BODY_H * 0.15, QUAD_BODY_L / 2.0 + QUAD_HEAD_SIZE * 0.45);
+    fprintf(f, "QuadLegFL  quad_leg.obj   QuadBody   %.4f     0.0      %.4f  ROTX   0.35  0.35  0.40\n", -QUAD_HIP_X, QUAD_HIP_Z_FRONT);
+    fprintf(f, "QuadLegFR  quad_leg.obj   QuadBody   %.4f     0.0      %.4f  ROTX   0.35  0.35  0.40\n", QUAD_HIP_X, QUAD_HIP_Z_FRONT);
+    fprintf(f, "QuadLegBL  quad_leg.obj   QuadBody   %.4f     0.0      %.4f  ROTX   0.35  0.35  0.40\n", -QUAD_HIP_X, QUAD_HIP_Z_BACK);
+    fprintf(f, "QuadLegBR  quad_leg.obj   QuadBody   %.4f     0.0      %.4f  ROTX   0.35  0.35  0.40\n", QUAD_HIP_X, QUAD_HIP_Z_BACK);
+
     fclose(f);
     printf("wrote %s\n", filename);
 }
@@ -150,6 +176,17 @@ int main(void) {
     /* 다리: 엉덩이(원점)에서 아래로 매달린 형태 (y: -LEG_LEN..0) */
     write_box_obj("leg.obj", -LEG_W / 2.0, LEG_W / 2.0,
                    -LEG_LEN, 0.0, -LEG_D / 2.0, LEG_D / 2.0);
+
+    /* 4족 로봇: 몸통은 중심이 원점인 상자(humanoid_scene.txt의
+       QuadBody 위치가 이미 들어올려주므로), 머리도 마찬가지, 다리는
+       엉덩이(원점)에서 아래로 매달린 형태 (humanoid 다리와 동일). */
+    write_box_obj("quad_body.obj", -QUAD_BODY_W / 2.0, QUAD_BODY_W / 2.0,
+                   -QUAD_BODY_H / 2.0, QUAD_BODY_H / 2.0, -QUAD_BODY_L / 2.0, QUAD_BODY_L / 2.0);
+    write_box_obj("quad_head.obj", -QUAD_HEAD_SIZE / 2.0, QUAD_HEAD_SIZE / 2.0,
+                   -QUAD_HEAD_SIZE / 2.0, QUAD_HEAD_SIZE / 2.0, -QUAD_HEAD_SIZE / 2.0, QUAD_HEAD_SIZE / 2.0);
+    write_box_obj("quad_leg.obj", -QUAD_LEG_W / 2.0, QUAD_LEG_W / 2.0,
+                   -QUAD_LEG_LEN, 0.0, -QUAD_LEG_D / 2.0, QUAD_LEG_D / 2.0);
+
     write_scene("humanoid_scene.txt");
     return 0;
 }

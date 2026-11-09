@@ -7,4 +7,7 @@ body.obj
 head.obj
 arm.obj
 leg.obj
+quad_body.obj
+quad_head.obj
+quad_leg.obj
 humanoid_scene.txt
