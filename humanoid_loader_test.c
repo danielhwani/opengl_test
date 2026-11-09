@@ -432,6 +432,72 @@ static void draw_ground(void) {
     glEnd();
 }
 
+/* 나무: humanoid_test.c와 동일 - 줄기(상자) + 크리스마스 트리처럼
+   아래로 갈수록 커지는 원뿔 3단 + 빨간 장식구. */
+static void draw_tree(double x, double z) {
+    static const double tier_y[3]      = {1.00, 1.45, 1.85};
+    static const double tier_radius[3] = {0.70, 0.52, 0.36};
+    static const double tier_height[3] = {0.85, 0.75, 0.65};
+    static const float tier_color[3][3] = {
+        {0.12f, 0.36f, 0.15f},
+        {0.15f, 0.44f, 0.18f},
+        {0.20f, 0.52f, 0.22f},
+    };
+
+    glPushMatrix();
+    glTranslated(x, 0.0, z);
+
+    glPushMatrix();
+        if (!rendering_shadow) glColor3f(0.40f, 0.26f, 0.13f); /* 줄기 */
+        glTranslated(0.0, 0.55, 0.0);
+        glScaled(0.22, 1.1, 0.22);
+        glutSolidCube(1.0);
+    glPopMatrix();
+
+    for (int i = 0; i < 3; i++) {
+        glPushMatrix();
+            if (!rendering_shadow) {
+                glColor3f(tier_color[i][0], tier_color[i][1], tier_color[i][2]);
+            }
+            glTranslated(0.0, tier_y[i], 0.0);
+            glRotated(-90.0, 1, 0, 0); /* 원뿔의 +Z축 -> +Y축(위) */
+            glutSolidCone(tier_radius[i], tier_height[i], 16, 4);
+        glPopMatrix();
+    }
+
+    {
+        static const int    orn_tier[]      = {0, 0, 0, 1, 1, 2, 2};
+        static const double orn_frac[]      = {0.25, 0.55, 0.80, 0.30, 0.70, 0.25, 0.65};
+        static const double orn_angle_deg[] = {20.0, 160.0, 280.0, 70.0, 250.0, 10.0, 190.0};
+        const int orn_count = (int)(sizeof(orn_tier) / sizeof(orn_tier[0]));
+
+        if (!rendering_shadow) glColor3f(0.85f, 0.08f, 0.08f); /* 빨간 장식구 */
+        for (int k = 0; k < orn_count; k++) {
+            int ti = orn_tier[k];
+            double h = orn_frac[k] * tier_height[ti];
+            double r = tier_radius[ti] * (1.0 - orn_frac[k]) * 1.08;
+            double ang = orn_angle_deg[k] * CAM_PI / 180.0;
+
+            glPushMatrix();
+                glTranslated(r * cos(ang), tier_y[ti] + h, r * sin(ang));
+                glutSolidSphere(0.09, 10, 10);
+            glPopMatrix();
+        }
+    }
+
+    glPopMatrix();
+}
+
+#define TREE_COUNT 5
+static const double tree_x[TREE_COUNT] = {-7.0,  7.0, 7.0, -7.0, 0.0};
+static const double tree_z[TREE_COUNT] = {-5.0, -5.0, 5.0,  5.0, 6.5};
+
+static void draw_trees(void) {
+    for (int i = 0; i < TREE_COUNT; i++) {
+        draw_tree(tree_x[i], tree_z[i]);
+    }
+}
+
 /* ---------------- OpenGL 보일러플레이트 ---------------- */
 
 static void init_gl(void) {
@@ -550,7 +616,11 @@ static void display(void) {
     draw_ground();
 
     /* 그림자 패스: humanoid_test.c와 동일 - 조명/텍스처를 끄고 반투명
-       검은색으로, 전단 변환을 곱한 채로 트리를 한 번 더 그린다. */
+       검은색으로, 전단 변환을 곱한 채로 몸과 나무를 한 번 더 그린다.
+       draw_humanoid_root()는 자기 몫의 ROOT 변환을 push/pop 없이 바로
+       곱하므로, 그 변환이 나무까지 새어나가지 않도록 별도로
+       glPushMatrix로 감싼다 (안 그러면 나무 그림자가 캐릭터를 따라
+       움직이고 도는 버그가 생긴다). */
     rendering_shadow = 1;
     glDisable(GL_LIGHTING);
     glDisable(GL_TEXTURE_2D);
@@ -560,7 +630,10 @@ static void display(void) {
     glColor4f(0.0f, 0.0f, 0.0f, 0.35f);
     glPushMatrix();
         apply_shadow_matrix(LIGHT_X, LIGHT_Y, LIGHT_Z);
-        draw_humanoid_root();
+        glPushMatrix();
+            draw_humanoid_root();
+        glPopMatrix();
+        draw_trees();
     glPopMatrix();
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
@@ -577,6 +650,8 @@ static void display(void) {
     glPushMatrix();
         draw_humanoid_root();
     glPopMatrix();
+
+    draw_trees();
 
     glDisable(GL_TEXTURE_2D);
 

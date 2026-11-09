@@ -503,6 +503,80 @@ static void draw_ground(void) {
     glEnd();
 }
 
+/* ---- 나무: 배경을 덜 밋밋하게 만드는 정적(static) 소품.
+   줄기(상자) + 크리스마스 트리처럼 아래로 갈수록 커지는 원뿔 3단을
+   겹쳐 쌓은 잎. draw_body/draw_arm 등과 똑같이 rendering_shadow
+   플래그로 그림자 패스에서는 색을 바꾸지 않는다. glutSolidCone은
+   기본적으로 +Z 방향으로 뾰족해지므로, X축으로 -90도 돌려 +Y(위)
+   방향을 향하게 한다. ---- */
+static void draw_tree(double x, double z) {
+    static const double tier_y[3]      = {1.00, 1.45, 1.85}; /* 아래->위 */
+    static const double tier_radius[3] = {0.70, 0.52, 0.36};
+    static const double tier_height[3] = {0.85, 0.75, 0.65};
+    static const float tier_color[3][3] = {
+        {0.12f, 0.36f, 0.15f}, /* 아래: 짙은 초록 */
+        {0.15f, 0.44f, 0.18f},
+        {0.20f, 0.52f, 0.22f}, /* 위: 밝은 초록 - 입체감 */
+    };
+
+    glPushMatrix();
+    glTranslated(x, 0.0, z);
+
+    glPushMatrix();
+        if (!rendering_shadow) glColor3f(0.40f, 0.26f, 0.13f); /* 줄기: 나무껍질색 */
+        glTranslated(0.0, 0.55, 0.0);
+        glScaled(0.22, 1.1, 0.22);
+        glutSolidCube(1.0);
+    glPopMatrix();
+
+    for (int i = 0; i < 3; i++) {
+        glPushMatrix();
+            if (!rendering_shadow) {
+                glColor3f(tier_color[i][0], tier_color[i][1], tier_color[i][2]);
+            }
+            glTranslated(0.0, tier_y[i], 0.0);
+            glRotated(-90.0, 1, 0, 0); /* 원뿔의 +Z축 -> +Y축(위) */
+            glutSolidCone(tier_radius[i], tier_height[i], 16, 4);
+        glPopMatrix();
+    }
+
+    /* 장식구: 각 원뿔 표면의 (높이 비율, 둘레 각도) 지점에 올려둔다.
+       그 높이에서의 원뿔 반지름 r(h) = tier_radius*(1 - h/tier_height)
+       (원뿔이라 선형으로 가늘어짐)에 약간의 여유(1.08배)를 둬서 잎
+       속에 파묻히지 않고 표면 위로 살짝 튀어나오게 한다. */
+    {
+        static const int    orn_tier[]      = {0, 0, 0, 1, 1, 2, 2};
+        static const double orn_frac[]      = {0.25, 0.55, 0.80, 0.30, 0.70, 0.25, 0.65};
+        static const double orn_angle_deg[] = {20.0, 160.0, 280.0, 70.0, 250.0, 10.0, 190.0};
+        const int orn_count = (int)(sizeof(orn_tier) / sizeof(orn_tier[0]));
+
+        if (!rendering_shadow) glColor3f(0.85f, 0.08f, 0.08f); /* 빨간 장식구 */
+        for (int k = 0; k < orn_count; k++) {
+            int ti = orn_tier[k];
+            double h = orn_frac[k] * tier_height[ti];
+            double r = tier_radius[ti] * (1.0 - orn_frac[k]) * 1.08;
+            double ang = orn_angle_deg[k] * CAM_PI / 180.0;
+
+            glPushMatrix();
+                glTranslated(r * cos(ang), tier_y[ti] + h, r * sin(ang));
+                glutSolidSphere(0.09, 10, 10);
+            glPopMatrix();
+        }
+    }
+
+    glPopMatrix();
+}
+
+#define TREE_COUNT 5
+static const double tree_x[TREE_COUNT] = {-7.0,  7.0, 7.0, -7.0, 0.0};
+static const double tree_z[TREE_COUNT] = {-5.0, -5.0, 5.0,  5.0, 6.5};
+
+static void draw_trees(void) {
+    for (int i = 0; i < TREE_COUNT; i++) {
+        draw_tree(tree_x[i], tree_z[i]);
+    }
+}
+
 static void display(void) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     draw_sky();
@@ -521,7 +595,7 @@ static void display(void) {
     draw_ground();
 
     /* 그림자 패스: 조명/텍스처를 끄고 반투명 검은색으로, 광원 기준
-       y=0 투영 행렬을 곱한 채로 몸 전체를 한 번 더 그린다. 깊이값은
+       y=0 투영 행렬을 곱한 채로 몸과 나무를 한 번 더 그린다. 깊이값은
        쓰지 않아서(glDepthMask(GL_FALSE)) 평면 위에 눌린 모양으로만
        남고 실제 몸이나 바닥과 z-fighting을 일으키지 않는다. */
     rendering_shadow = 1;
@@ -533,7 +607,16 @@ static void display(void) {
     glColor4f(0.0f, 0.0f, 0.0f, 0.35f);
     glPushMatrix();
         apply_shadow_matrix(LIGHT_X, LIGHT_Y, LIGHT_Z);
-        draw_humanoid_body();
+        /* draw_humanoid_body()는 자기 몫의 glTranslated/glRotated(ROOT)를
+           push/pop 없이 바로 현재 행렬에 곱한다 - display()의 실제 몸
+           패스에서는 그걸 glPushMatrix로 감싸서 격리해주는데, 여기서도
+           똑같이 감싸야 한다. 안 그러면 몸의 ROOT 변환이 그대로 남아있는
+           상태로 draw_trees()가 불려서, 나무까지 몸을 따라 돌고 움직이는
+           것처럼 보인다(그림자가 캐릭터를 따라 빙글빙글 도는 버그). */
+        glPushMatrix();
+            draw_humanoid_body();
+        glPopMatrix();
+        draw_trees();
     glPopMatrix();
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
@@ -550,6 +633,8 @@ static void display(void) {
     glPushMatrix();
         draw_humanoid_body();
     glPopMatrix();
+
+    draw_trees();
 
     glDisable(GL_TEXTURE_2D);
 
