@@ -322,6 +322,79 @@ static void create_checker_texture(void) {
                  GL_RGB, GL_UNSIGNED_BYTE, checker);
 }
 
+/* ---- 사람 몸에 입힐 좀 더 그럴듯한 텍스처 3종 (피부/상의/하의) ----
+   humanoid_test.c와 동일. 체커 패턴 하나로 모든 부위를 덮던 것 대신
+   부위별로 다른 (단색) 텍스처를 입힌다. */
+#define BODY_TEX_SIZE 64
+
+static GLuint upload_body_texture(unsigned char *pixels) {
+    GLuint id;
+    glGenTextures(1, &id);
+    glBindTexture(GL_TEXTURE_2D, id);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, BODY_TEX_SIZE, BODY_TEX_SIZE, 0,
+                 GL_RGB, GL_UNSIGNED_BYTE, pixels);
+    return id;
+}
+
+static GLuint skin_texture_id = 0;
+static GLuint shirt_texture_id = 0;
+static GLuint pants_texture_id = 0;
+
+/* 피부: 살색 단색. */
+static void create_skin_texture(void) {
+    static unsigned char pix[BODY_TEX_SIZE][BODY_TEX_SIZE][3];
+    for (int i = 0; i < BODY_TEX_SIZE; i++) {
+        for (int j = 0; j < BODY_TEX_SIZE; j++) {
+            pix[i][j][0] = 222; pix[i][j][1] = 180; pix[i][j][2] = 150;
+        }
+    }
+    skin_texture_id = upload_body_texture(&pix[0][0][0]);
+}
+
+/* 상의: 가로 줄무늬 (셔츠처럼). */
+static void create_shirt_texture(void) {
+    static unsigned char pix[BODY_TEX_SIZE][BODY_TEX_SIZE][3];
+    for (int i = 0; i < BODY_TEX_SIZE; i++) {
+        int stripe = (i / 8) % 2;
+        for (int j = 0; j < BODY_TEX_SIZE; j++) {
+            if (stripe == 0) {
+                pix[i][j][0] = 50; pix[i][j][1] = 80; pix[i][j][2] = 150;
+            } else {
+                pix[i][j][0] = 215; pix[i][j][1] = 220; pix[i][j][2] = 235;
+            }
+        }
+    }
+    shirt_texture_id = upload_body_texture(&pix[0][0][0]);
+}
+
+/* 하의: 데님 느낌의 짙은 청색 단색. */
+static void create_pants_texture(void) {
+    static unsigned char pix[BODY_TEX_SIZE][BODY_TEX_SIZE][3];
+    for (int i = 0; i < BODY_TEX_SIZE; i++) {
+        for (int j = 0; j < BODY_TEX_SIZE; j++) {
+            pix[i][j][0] = 60; pix[i][j][1] = 80; pix[i][j][2] = 120;
+        }
+    }
+    pants_texture_id = upload_body_texture(&pix[0][0][0]);
+}
+
+/* 부위 이름(씬 파일의 Body/Head/LeftArm/...)으로 어떤 텍스처를 입힐지
+   고른다. humanoid_test.c는 draw_body/draw_head처럼 부위별 함수가
+   따로 있어서 그 안에서 직접 바인딩하지만, 로더 버전은 모든 부위를
+   render_children() 하나가 데이터로 순회하며 그리므로 이름으로
+   분기한다. */
+static GLuint texture_for_part(const char *name) {
+    if (strcmp(name, "Head") == 0) return skin_texture_id;
+    if (strcmp(name, "Body") == 0) return shirt_texture_id;
+    if (strcmp(name, "LeftArm") == 0 || strcmp(name, "RightArm") == 0) return shirt_texture_id;
+    if (strcmp(name, "LeftLeg") == 0 || strcmp(name, "RightLeg") == 0) return pants_texture_id;
+    return 0;
+}
+
 static double angle_for_part(const char *name) {
     if (strcmp(name, "LeftArm") == 0) return left_angle;
     if (strcmp(name, "RightArm") == 0) return right_angle;
@@ -342,22 +415,37 @@ static void render_children(const char *parent_name) {
         Part *p = &g_parts[i];
         if (strcmp(p->parent, parent_name) != 0) continue;
 
+        int tex_on = texturing && !rendering_shadow;
+        GLuint part_tex = texture_for_part(p->name);
+
         glPushMatrix();
         glTranslated(p->t[0], p->t[1], p->t[2]);
         if (p->joint == JOINT_ROTX) {
             glRotated(angle_for_part(p->name), 1, 0, 0);
         }
-        if (!rendering_shadow) glColor3f(p->color[0], p->color[1], p->color[2]);
+        if (tex_on && part_tex != 0) {
+            /* 부위별 텍스처(피부/상의/하의)를 입히는 동안은 glColor를
+               흰색으로 둬야 한다 - GL_MODULATE라 최종 색 = 텍스처 색 *
+               vertex 색인데, 씬 파일에 적힌 칙칙한 색을 그대로 두면
+               텍스처 색 위에 덧씌워져 탁해진다. */
+            glBindTexture(GL_TEXTURE_2D, part_tex);
+            if (!rendering_shadow) glColor3f(1.0f, 1.0f, 1.0f);
+        } else if (!rendering_shadow) {
+            glColor3f(p->color[0], p->color[1], p->color[2]);
+        }
         draw_mesh(p->mesh_index);
 
         if (strcmp(p->name, "Head") == 0) {
             /* 코: 머리 앞쪽(+Z)에 작은 돌출부를 붙여 앞/뒤를 구별한다.
-               humanoid_test.c의 draw_head()와 동일한 원리. */
+               humanoid_test.c의 draw_head()와 동일한 원리. 피부 텍스처
+               위에 순색 빨강이 또렷이 보이도록 텍스처를 잠깐 끈다. */
+            if (tex_on) glDisable(GL_TEXTURE_2D);
             glPushMatrix();
             if (!rendering_shadow) glColor3f(0.85f, 0.25f, 0.25f);
             glTranslated(0.0, HEAD_R, HEAD_R * 0.85);
             glutSolidSphere(HEAD_R * 0.28, 12, 12);
             glPopMatrix();
+            if (tex_on) glEnable(GL_TEXTURE_2D);
         }
 
         render_children(p->name); /* 이 부위를 부모로 둔 자식들 */
@@ -518,6 +606,9 @@ static void init_gl(void) {
     glEnable(GL_NORMALIZE);
 
     create_checker_texture();
+    create_skin_texture();
+    create_shirt_texture();
+    create_pants_texture();
 
     glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_OBJECT_LINEAR);
     glTexGeni(GL_T, GL_TEXTURE_GEN_MODE, GL_OBJECT_LINEAR);
@@ -607,12 +698,9 @@ static void display(void) {
 
     draw_axes(1.0);
 
-    if (texturing) {
-        glEnable(GL_TEXTURE_2D);
-        glBindTexture(GL_TEXTURE_2D, texture_id);
-    } else {
-        glDisable(GL_TEXTURE_2D);
-    }
+    /* 땅: 체커 텍스처와는 완전히 분리해서, texturing 토글과 무관하게
+       항상 draw_ground() 안의 glColor3f(흙색)만으로 그린다. */
+    glDisable(GL_TEXTURE_2D);
     draw_ground();
 
     /* 그림자 패스: humanoid_test.c와 동일 - 조명/텍스처를 끄고 반투명
@@ -640,9 +728,11 @@ static void display(void) {
     rendering_shadow = 0;
     if (lighting) glEnable(GL_LIGHTING);
 
+    /* 실제 몸: texturing이 켜져 있으면 render_children()이 부위별로
+       알아서 자기 몫의 텍스처(셔츠/피부/바지)를 바인딩한다. 여기서는
+       그냥 켜줄지 말지만 결정한다. */
     if (texturing) {
         glEnable(GL_TEXTURE_2D);
-        glBindTexture(GL_TEXTURE_2D, texture_id);
     } else {
         glDisable(GL_TEXTURE_2D);
     }
@@ -651,6 +741,9 @@ static void display(void) {
         draw_humanoid_root();
     glPopMatrix();
 
+    /* 나무: 땅과 마찬가지로 체커 텍스처와 분리해서, 항상
+       draw_tree() 안의 glColor3f(줄기/잎/장식구 색)만으로 그린다. */
+    glDisable(GL_TEXTURE_2D);
     draw_trees();
 
     glDisable(GL_TEXTURE_2D);

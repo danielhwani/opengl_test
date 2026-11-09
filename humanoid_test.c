@@ -232,6 +232,73 @@ static void create_checker_texture(void) {
                  GL_RGB, GL_UNSIGNED_BYTE, checker);
 }
 
+/* ---- 사람 몸에 입힐 좀 더 그럴듯한 텍스처 3종 (피부/상의/하의) ----
+   체커 패턴 하나로 모든 부위를 덮던 것 대신, 부위별로 다른 텍스처를
+   입혀 사람처럼 보이게 한다. 진짜 이미지 파일 없이, 픽셀 배열을
+   직접 채워서 절차적으로(procedurally) 만든다. */
+#define BODY_TEX_SIZE 64
+
+static GLuint upload_body_texture(unsigned char *pixels) {
+    GLuint id;
+    glGenTextures(1, &id);
+    glBindTexture(GL_TEXTURE_2D, id);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, BODY_TEX_SIZE, BODY_TEX_SIZE, 0,
+                 GL_RGB, GL_UNSIGNED_BYTE, pixels);
+    return id;
+}
+
+static GLuint skin_texture_id = 0;
+static GLuint shirt_texture_id = 0;
+static GLuint pants_texture_id = 0;
+
+/* 피부: 살색 단색. 처음엔 (i*7+j*13)%17 같은 좌표 기반 잡티를 섞어
+   봤는데, 그 모듈러 연산 패턴이 일정한 간격으로 반복되면서(특히
+   작은 텍스처 좌표 범위에 겹쳐 보일 때) 체커 패턴과 다를 바 없는
+   격자 무늬처럼 보여 오히려 더 보기 나빴다. 그래서 잡티 없는
+   깔끔한 단색으로 되돌렸다. */
+static void create_skin_texture(void) {
+    static unsigned char pix[BODY_TEX_SIZE][BODY_TEX_SIZE][3];
+    for (int i = 0; i < BODY_TEX_SIZE; i++) {
+        for (int j = 0; j < BODY_TEX_SIZE; j++) {
+            pix[i][j][0] = 222; pix[i][j][1] = 180; pix[i][j][2] = 150;
+        }
+    }
+    skin_texture_id = upload_body_texture(&pix[0][0][0]);
+}
+
+/* 상의: 가로 줄무늬 (셔츠처럼). i(세로 방향)를 8픽셀 단위로 묶어
+   짙은/밝은 색을 번갈아 준다. */
+static void create_shirt_texture(void) {
+    static unsigned char pix[BODY_TEX_SIZE][BODY_TEX_SIZE][3];
+    for (int i = 0; i < BODY_TEX_SIZE; i++) {
+        int stripe = (i / 8) % 2;
+        for (int j = 0; j < BODY_TEX_SIZE; j++) {
+            if (stripe == 0) {
+                pix[i][j][0] = 50; pix[i][j][1] = 80; pix[i][j][2] = 150;
+            } else {
+                pix[i][j][0] = 215; pix[i][j][1] = 220; pix[i][j][2] = 235;
+            }
+        }
+    }
+    shirt_texture_id = upload_body_texture(&pix[0][0][0]);
+}
+
+/* 하의: 데님 느낌의 짙은 청색 단색. skin과 같은 이유로 잡티 노이즈를
+   빼고 깔끔한 단색만 쓴다. */
+static void create_pants_texture(void) {
+    static unsigned char pix[BODY_TEX_SIZE][BODY_TEX_SIZE][3];
+    for (int i = 0; i < BODY_TEX_SIZE; i++) {
+        for (int j = 0; j < BODY_TEX_SIZE; j++) {
+            pix[i][j][0] = 60; pix[i][j][1] = 80; pix[i][j][2] = 120;
+        }
+    }
+    pants_texture_id = upload_body_texture(&pix[0][0][0]);
+}
+
 static void init_gl(void) {
     glEnable(GL_DEPTH_TEST);
     glClearColor(0.10f, 0.10f, 0.12f, 1.0f);
@@ -250,6 +317,9 @@ static void init_gl(void) {
     glEnable(GL_NORMALIZE);
 
     create_checker_texture();
+    create_skin_texture();
+    create_shirt_texture();
+    create_pants_texture();
 
     glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_OBJECT_LINEAR);
     glTexGeni(GL_T, GL_TEXTURE_GEN_MODE, GL_OBJECT_LINEAR);
@@ -332,50 +402,85 @@ static void draw_axes(double length) {
    그냥 두면 그림자가 몸 색 그대로 투영돼버린다. */
 static int rendering_shadow = 0;
 
-/* 몸통: 현재 원점을 중심으로 한 상자 */
+/* 부위별 텍스처(피부/상의/하의)로 바꿔 칠하는 동안은 glColor를
+   흰색으로 둬야 한다 - GL_MODULATE 모드라 최종 색 = 텍스처 색 *
+   vertex 색인데, 기존의 칙칙한 회색/남색 vertex 색을 그대로 두면
+   텍스처 색 위에 그 색이 덧씌워져 탁해진다. 텍스처가 꺼져 있을
+   때는(tex_on == 0) 원래 쓰던 단색으로 그대로 돌아간다. */
+static int tex_on(void) {
+    return texturing && !rendering_shadow;
+}
+
+/* 몸통: 현재 원점을 중심으로 한 상자. 상의(셔츠) 텍스처를 입힌다. */
 static void draw_body(void) {
     glPushMatrix();
-    if (!rendering_shadow) glColor3f(0.55f, 0.55f, 0.65f);
+    if (tex_on()) {
+        glBindTexture(GL_TEXTURE_2D, shirt_texture_id);
+        if (!rendering_shadow) glColor3f(1.0f, 1.0f, 1.0f);
+    } else if (!rendering_shadow) {
+        glColor3f(0.55f, 0.55f, 0.65f);
+    }
     glScaled(BODY_W, BODY_H, BODY_D);
     glutSolidCube(1.0);
     glPopMatrix();
 }
 
-/* 머리: 목 위치(현재 원점)에서 반지름만큼 위로 띄운 구.
-   +Z쪽에 작은 코를 붙여 앞/뒤를 구별한다 - heading=0일 때 forward
-   벡터가 (sin(heading), cos(heading)) = (0, 1), 즉 로컬 +Z축이라
-   코도 그 축 위에 놓아야 실제로 "앞"을 가리킨다. */
+/* 머리: 목 위치(현재 원점)에서 반지름만큼 위로 띄운 구. 피부 텍스처를
+   입힌다. +Z쪽에 작은 코를 붙여 앞/뒤를 구별한다 - heading=0일 때
+   forward 벡터가 (sin(heading), cos(heading)) = (0, 1), 즉 로컬 +Z축
+   이라 코도 그 축 위에 놓아야 실제로 "앞"을 가리킨다. 코는 피부
+   텍스처 위에 순색 빨강이 또렷이 보이도록 텍스처를 잠깐 끈다. */
 static void draw_head(void) {
+    int t = tex_on();
     glPushMatrix();
-    if (!rendering_shadow) glColor3f(0.85f, 0.75f, 0.65f);
+    if (t) {
+        glBindTexture(GL_TEXTURE_2D, skin_texture_id);
+        if (!rendering_shadow) glColor3f(1.0f, 1.0f, 1.0f);
+    } else if (!rendering_shadow) {
+        glColor3f(0.85f, 0.75f, 0.65f);
+    }
     glTranslated(0.0, HEAD_R, 0.0);
     glutSolidSphere(HEAD_R, 24, 24);
 
+    if (t) glDisable(GL_TEXTURE_2D);
     if (!rendering_shadow) glColor3f(0.85f, 0.25f, 0.25f);
     glTranslated(0.0, 0.0, HEAD_R * 0.85);
     glutSolidSphere(HEAD_R * 0.28, 12, 12);
+    if (t) glEnable(GL_TEXTURE_2D);
 
     glPopMatrix();
 }
 
-/* 팔: 어깨(현재 원점)에서 옆으로 벌리고 아래로 매달리는 상자.
-   여기서 하는 이동(옆으로 SHOULDER_X)은 x축이고, 회전(R1/R2)도
-   x축 기준이라 서로 간섭하지 않는다 - 그래서 바깥에서 회전을
-   먼저 적용해도 어깨 지점이 정확히 회전축이 된다. */
+/* 팔: 어깨(현재 원점)에서 옆으로 벌리고 아래로 매달리는 상자. 긴팔
+   소매라고 보고 상의와 같은 텍스처를 입힌다. 여기서 하는 이동(옆으로
+   SHOULDER_X)은 x축이고, 회전(R1/R2)도 x축 기준이라 서로 간섭하지
+   않는다 - 그래서 바깥에서 회전을 먼저 적용해도 어깨 지점이 정확히
+   회전축이 된다. */
 static void draw_arm(double side_x) {
     glPushMatrix();
-    if (!rendering_shadow) glColor3f(0.45f, 0.45f, 0.55f);
+    if (tex_on()) {
+        glBindTexture(GL_TEXTURE_2D, shirt_texture_id);
+        if (!rendering_shadow) glColor3f(1.0f, 1.0f, 1.0f);
+    } else if (!rendering_shadow) {
+        glColor3f(0.45f, 0.45f, 0.55f);
+    }
     glTranslated(side_x, -ARM_LEN / 2.0, 0.0);
     glScaled(ARM_W, ARM_LEN, ARM_D);
     glutSolidCube(1.0);
     glPopMatrix();
 }
 
-/* 다리: 엉덩이(현재 원점)에서 아래로 매달리는 상자. 팔과 같은 원리로
-   x축 회전이 그대로 엉덩이 관절 회전이 된다. */
+/* 다리: 엉덩이(현재 원점)에서 아래로 매달리는 상자. 바지(하의)
+   텍스처를 입힌다. 팔과 같은 원리로 x축 회전이 그대로 엉덩이 관절
+   회전이 된다. */
 static void draw_leg(double side_x) {
     glPushMatrix();
-    if (!rendering_shadow) glColor3f(0.35f, 0.35f, 0.45f);
+    if (tex_on()) {
+        glBindTexture(GL_TEXTURE_2D, pants_texture_id);
+        if (!rendering_shadow) glColor3f(1.0f, 1.0f, 1.0f);
+    } else if (!rendering_shadow) {
+        glColor3f(0.35f, 0.35f, 0.45f);
+    }
     glTranslated(side_x, -LEG_LEN / 2.0, 0.0);
     glScaled(LEG_W, LEG_LEN, LEG_D);
     glutSolidCube(1.0);
@@ -586,12 +691,9 @@ static void display(void) {
 
     draw_axes(1.0);
 
-    if (texturing) {
-        glEnable(GL_TEXTURE_2D);
-        glBindTexture(GL_TEXTURE_2D, texture_id);
-    } else {
-        glDisable(GL_TEXTURE_2D);
-    }
+    /* 땅: 체커 텍스처와는 완전히 분리해서, texturing 토글과 무관하게
+       항상 draw_ground() 안의 glColor3f(흙색)만으로 그린다. */
+    glDisable(GL_TEXTURE_2D);
     draw_ground();
 
     /* 그림자 패스: 조명/텍스처를 끄고 반투명 검은색으로, 광원 기준
@@ -623,9 +725,11 @@ static void display(void) {
     rendering_shadow = 0;
     if (lighting) glEnable(GL_LIGHTING);
 
+    /* 실제 몸: texturing이 켜져 있으면 draw_body/draw_head/draw_arm/
+       draw_leg가 각자 알아서 자기 몫의 텍스처(셔츠/피부/바지)를
+       바인딩한다. 여기서는 그냥 켜줄지 말지만 결정한다. */
     if (texturing) {
         glEnable(GL_TEXTURE_2D);
-        glBindTexture(GL_TEXTURE_2D, texture_id);
     } else {
         glDisable(GL_TEXTURE_2D);
     }
@@ -634,6 +738,9 @@ static void display(void) {
         draw_humanoid_body();
     glPopMatrix();
 
+    /* 나무: 땅과 마찬가지로 체커 텍스처와 분리해서, 항상
+       draw_tree() 안의 glColor3f(줄기/잎/장식구 색)만으로 그린다. */
+    glDisable(GL_TEXTURE_2D);
     draw_trees();
 
     glDisable(GL_TEXTURE_2D);
