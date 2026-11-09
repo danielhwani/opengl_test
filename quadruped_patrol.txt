@@ -1,0 +1,7 @@
+# quadruped_patrol.txt
+# 4족 로봇이 x축 방향으로 왕복(patrol)하는 경로 설정.
+# 한 줄: "z x_min x_max speed"
+#   z     : 고정된 z 위치 (humanoid의 걷는 경로와 겹치지 않는 값으로)
+#   x_min, x_max : 왕복하는 x 범위
+#   speed : 왕복 각속도 (t 단위당 라디안 - 클수록 빨리 왕복)
+-9.0 -4.0 4.0 0.3

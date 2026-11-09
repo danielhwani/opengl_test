@@ -586,6 +586,129 @@ static void draw_trees(void) {
     }
 }
 
+/* ---- 4족 보행 로봇: humanoid_test.c와 동일. 몸통 + 머리 + 다리 4개로,
+   humanoid와 똑같은 matrix stack 기법을 쓴다. humanoid의 걷는 경로
+   (사각형, z는 -3.5..3.5)와 겹치지 않는 z=quad_patrol_z(기본 -9, 훨씬
+   바깥쪽)에 고정해두고, 그 위에서 x축 방향으로만 왕복(patrol)한다 -
+   동선이 사람과 절대 교차하지 않는다. 걸을 때는 트롯(trot) 걸음걸이로:
+   대각선으로 마주보는 두 다리가 쌍을 이뤄 서로 반대 위상으로 흔들린다.
+   몸 색은 땅/나무처럼 texturing 토글과 분리된 단색이다. ---- */
+#define QUAD_BODY_W 0.5
+#define QUAD_BODY_L 1.2
+#define QUAD_BODY_H 0.4
+#define QUAD_HEAD_SIZE 0.3
+#define QUAD_LEG_W 0.12
+#define QUAD_LEG_LEN 0.55
+#define QUAD_LEG_D 0.12
+#define QUAD_HIP_X (QUAD_BODY_W / 2.0)
+#define QUAD_HIP_Z_FRONT (QUAD_BODY_L / 2.0 - QUAD_LEG_D / 2.0)
+#define QUAD_HIP_Z_BACK (-(QUAD_BODY_L / 2.0 - QUAD_LEG_D / 2.0))
+#define QUAD_TURN_SHARPNESS 6.0 /* 클수록 방향 전환 구간이 좁고 급함 */
+
+/* 왕복 경로는 humanoid_path.txt와 같은 원칙으로 하드코딩하지 않고
+   quadruped_patrol.txt에서 읽는다 ("z x_min x_max speed" 한 줄).
+   파일이 없으면 기본값을 쓴다. */
+static double quad_patrol_z = -9.0;
+static double quad_patrol_x_min = -4.0;
+static double quad_patrol_x_max = 4.0;
+static double quad_patrol_speed = 0.3;
+
+static void load_quad_patrol(const char *filename) {
+    FILE *f = fopen(filename, "r");
+    if (!f) {
+        fprintf(stderr, "4족 로봇 경로 파일을 열 수 없어 기본값을 사용합니다: %s\n", filename);
+        return;
+    }
+    char line[128];
+    while (fgets(line, sizeof(line), f)) {
+        if (line[0] == '#' || line[0] == '\n' || line[0] == '\r') continue;
+        double z, xmin, xmax, speed;
+        if (sscanf(line, "%lf %lf %lf %lf", &z, &xmin, &xmax, &speed) == 4) {
+            quad_patrol_z = z;
+            quad_patrol_x_min = xmin;
+            quad_patrol_x_max = xmax;
+            quad_patrol_speed = speed;
+            break; /* 첫 번째 유효한 줄 하나만 쓴다 */
+        }
+    }
+    fclose(f);
+}
+
+static double quad_x = 0.0;
+static double quad_heading = 90.0; /* degrees, y축 둘레 회전 */
+static double quad_fl_angle = 0.0; /* front-left */
+static double quad_fr_angle = 0.0; /* front-right */
+static double quad_bl_angle = 0.0; /* back-left */
+static double quad_br_angle = 0.0; /* back-right */
+
+static void draw_quad_body(void) {
+    glPushMatrix();
+    if (!rendering_shadow) glColor3f(0.50f, 0.55f, 0.60f);
+    glScaled(QUAD_BODY_W, QUAD_BODY_H, QUAD_BODY_L);
+    glutSolidCube(1.0);
+    glPopMatrix();
+}
+
+static void draw_quad_head(void) {
+    glPushMatrix();
+    if (!rendering_shadow) glColor3f(0.60f, 0.62f, 0.65f);
+    glScaled(QUAD_HEAD_SIZE, QUAD_HEAD_SIZE, QUAD_HEAD_SIZE);
+    glutSolidCube(1.0);
+    glPopMatrix();
+}
+
+static void draw_quad_leg(void) {
+    glPushMatrix();
+    if (!rendering_shadow) glColor3f(0.35f, 0.35f, 0.40f);
+    glTranslated(0.0, -QUAD_LEG_LEN / 2.0, 0.0);
+    glScaled(QUAD_LEG_W, QUAD_LEG_LEN, QUAD_LEG_D);
+    glutSolidCube(1.0);
+    glPopMatrix();
+}
+
+/* draw_trees()처럼 자기 몫의 ROOT 변환을 내부에서 직접 push/pop으로
+   감싸서, 호출하는 쪽에서 따로 감싸지 않아도 변환이 새지 않는다. */
+static void draw_quadruped(void) {
+    glPushMatrix();
+        glTranslated(quad_x, QUAD_LEG_LEN, quad_patrol_z); /* ROOT: 발이 땅에 닿도록 들어올림 */
+        glRotated(quad_heading, 0, 1, 0);                   /* ROOT: 이동 방향을 바라봄 */
+
+        glPushMatrix();
+            glTranslated(0.0, QUAD_BODY_H / 2.0, 0.0); /* body: T1 */
+            draw_quad_body();
+
+            glPushMatrix();
+                glTranslated(0.0, QUAD_BODY_H * 0.15, QUAD_BODY_L / 2.0 + QUAD_HEAD_SIZE * 0.45); /* head: T1*T2 */
+                draw_quad_head();
+            glPopMatrix();
+        glPopMatrix();
+
+        glPushMatrix();
+            glTranslated(-QUAD_HIP_X, 0.0, QUAD_HIP_Z_FRONT);
+            glRotated(quad_fl_angle, 1, 0, 0);
+            draw_quad_leg();
+        glPopMatrix();
+
+        glPushMatrix();
+            glTranslated(QUAD_HIP_X, 0.0, QUAD_HIP_Z_FRONT);
+            glRotated(quad_fr_angle, 1, 0, 0);
+            draw_quad_leg();
+        glPopMatrix();
+
+        glPushMatrix();
+            glTranslated(-QUAD_HIP_X, 0.0, QUAD_HIP_Z_BACK);
+            glRotated(quad_bl_angle, 1, 0, 0);
+            draw_quad_leg();
+        glPopMatrix();
+
+        glPushMatrix();
+            glTranslated(QUAD_HIP_X, 0.0, QUAD_HIP_Z_BACK);
+            glRotated(quad_br_angle, 1, 0, 0);
+            draw_quad_leg();
+        glPopMatrix();
+    glPopMatrix();
+}
+
 /* ---------------- OpenGL 보일러플레이트 ---------------- */
 
 static void init_gl(void) {
@@ -722,6 +845,7 @@ static void display(void) {
             draw_humanoid_root();
         glPopMatrix();
         draw_trees();
+        draw_quadruped();
     glPopMatrix();
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
@@ -741,10 +865,11 @@ static void display(void) {
         draw_humanoid_root();
     glPopMatrix();
 
-    /* 나무: 땅과 마찬가지로 체커 텍스처와 분리해서, 항상
-       draw_tree() 안의 glColor3f(줄기/잎/장식구 색)만으로 그린다. */
+    /* 나무/4족 로봇: 땅과 마찬가지로 체커 텍스처와 분리해서, 항상
+       각자의 glColor3f만으로 그린다. */
     glDisable(GL_TEXTURE_2D);
     draw_trees();
+    draw_quadruped();
 
     glDisable(GL_TEXTURE_2D);
 
@@ -764,6 +889,24 @@ static void idle(void) {
            고정값을 누적시키지 않고 t로부터 직접 계산하므로(path_sample),
            idle() 호출 빈도(프레임 속도)와 무관하게 항상 같은 속도로 걷는다. */
         path_sample(0.6 * t, &body_x, &body_z, &body_heading);
+
+        /* 4족 로봇은 x축 방향으로만 왕복(patrol)한다 - humanoid_test.c와
+           동일한 이유/계산. 방향 전환은 tanh로 완만하게 이어서 왕복 양
+           끝에서 순간이동하듯 꺾이지 않고 제자리에서 도는 것처럼
+           보이게 한다. */
+        double quad_center = (quad_patrol_x_min + quad_patrol_x_max) / 2.0;
+        double quad_half_range = (quad_patrol_x_max - quad_patrol_x_min) / 2.0;
+        double quad_phase = quad_patrol_speed * t;
+        quad_x = quad_center + quad_half_range * sin(quad_phase);
+        quad_heading = 90.0 * tanh(QUAD_TURN_SHARPNESS * cos(quad_phase));
+
+        /* 트롯(trot) 걸음걸이도 같은 t로부터 직접 계산한다. 대각선
+           다리 쌍이 반대 위상. */
+        double quad_swing = 30.0 * sin(2.0 * t);
+        quad_fl_angle = quad_swing;
+        quad_br_angle = quad_swing;
+        quad_fr_angle = -quad_swing;
+        quad_bl_angle = -quad_swing;
     }
     glutPostRedisplay();
 }
@@ -853,6 +996,7 @@ static void reshape(int w, int h) {
 
 int main(int argc, char **argv) {
     load_path("humanoid_path.txt");
+    load_quad_patrol("quadruped_patrol.txt");
     load_scene("humanoid_scene.txt");
 
     glutInit(&argc, argv);
