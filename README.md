@@ -558,16 +558,25 @@ Y-up 그대로 남겨 OpenGL 데모에는 영향이 없다). 상자 메쉬는
 min/max 구간일 뿐이라 재배치로 충분함), 구(머리)는 극축이 코드에
 박혀 있어서 `write_sphere_obj_zup()`을 따로 만들었다.
 
-### 다음 단계로 남겨둔 것
+### ROS2 노드로 TF/joint_states 발행하기
 
-- URDF의 `<mesh filename="...">`는 지금 상대 경로(예:
-  `body_ros.obj`)만 적혀 있다. 실제로 `robot_state_publisher`/
-  RViz2에서 띄우려면 ROS 패키지를 만들어 `package://<pkg>/...`로
-  바꾸거나, 절대경로 `file:///...`로 바꿔야 한다.
-- TF/`joint_states`를 발행하는 ROS2 노드(`rclpy`)는 아직 없다 -
-  이번엔 "URDF/YAML 파일 생성까지"로 범위를 정했고, 다음 단계는
-  이 노드를 작성해서 지금 이 세션에서 바로 쓸 수 있는 Windows용
-  ROS2 Humble + RViz2로 실제 시각화해보는 것.
+`<mesh filename="...">`는 이 머신의 절대경로를 `file://` URI로
+박아 넣어서(`ASSET_URI_PREFIX`), 별도 ROS 패키지/`package://` 없이도
+`robot_state_publisher`/RViz2가 메쉬를 바로 찾을 수 있게 해뒀다.
+
+실제로 TF/`joint_states`를 발행해서 RViz2로 보는 ROS2 노드는
+`D:\claude_test\ros2_ws\src\humanoid_sim`에 따로 만들었다
+(`humanoid_state_publisher`/`quadruped_state_publisher`, 둘 다
+Python/rclpy) - `path_sample`(Catmull-Rom)과 걷기/트롯 공식을
+그대로 포팅해서 `world -> base_link` / `world -> quad_base_link`
+TF와 팔다리/다리 관절의 `joint_states`를 발행하고,
+`robot_state_publisher`가 나머지(Body/Head/LeftArm/... 등 모든
+링크의 TF)를 URDF로부터 계산해 채운다. 빌드/실행 방법과 원본
+OpenGL 데모와 다른 점(키보드 조작·클론·배경 미포함 등)은 그
+패키지의 `README.md`에 있다. **이 세션에는 colcon/ros2 환경이
+없어서 Python 헬퍼 함수(경로/순찰 계산)만 단위 테스트로
+확인했고, 실제 ROS2 Humble에서 빌드·실행·RViz2 표시까지는
+검증하지 못했다** - 사용자가 자신의 ROS2 셸에서 확인해야 한다.
 
 ## 구현 메모
 

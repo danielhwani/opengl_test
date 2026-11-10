@@ -33,6 +33,13 @@
 
 #define PI 3.14159265358979323846
 
+/* URDF의 <mesh filename="...">에 쓸 기본 경로. 이 프로젝트가 아직
+   ROS 패키지가 아니라서(package://를 쓸 수 없어서) 이 머신에서의
+   절대 경로를 file:// URI로 그냥 박아 넣는다 - robot_state_publisher/
+   RViz2가 바로 찾을 수 있게 하기 위해서다. 프로젝트 폴더를 옮기면
+   이 값을 바꾸고 gen_humanoid_assets.exe를 다시 돌려야 한다. */
+#define ASSET_URI_PREFIX "file:///D:/claude_test/computer_graphics/"
+
 /* humanoid_test.c와 동일한 치수 */
 #define BODY_W 0.8
 #define BODY_H 1.4
@@ -288,7 +295,7 @@ static void write_humanoid_urdf(const char *filename) {
 
     fprintf(f, "  <link name=\"Body\">\n");
     fprintf(f, "    <visual>\n");
-    fprintf(f, "      <geometry><mesh filename=\"body_ros.obj\"/></geometry>\n");
+    fprintf(f, "      <geometry><mesh filename=\"" ASSET_URI_PREFIX "body_ros.obj\"/></geometry>\n");
     fprintf(f, "      <material name=\"Body_material\"><color rgba=\"0.55 0.55 0.65 1.0\"/></material>\n");
     fprintf(f, "    </visual>\n");
     fprintf(f, "  </link>\n\n");
@@ -301,7 +308,7 @@ static void write_humanoid_urdf(const char *filename) {
 
     fprintf(f, "  <link name=\"Head\">\n");
     fprintf(f, "    <visual>\n");
-    fprintf(f, "      <geometry><mesh filename=\"head_ros.obj\"/></geometry>\n");
+    fprintf(f, "      <geometry><mesh filename=\"" ASSET_URI_PREFIX "head_ros.obj\"/></geometry>\n");
     fprintf(f, "      <material name=\"Head_material\"><color rgba=\"0.85 0.75 0.65 1.0\"/></material>\n");
     fprintf(f, "    </visual>\n");
     fprintf(f, "    <!-- 코: humanoid_test.c의 draw_head()에서는 OBJ 메쉬가 아니라 매\n");
@@ -323,7 +330,7 @@ static void write_humanoid_urdf(const char *filename) {
     fprintf(f, "  </joint>\n\n");
     fprintf(f, "  <link name=\"LeftArm\">\n");
     fprintf(f, "    <visual>\n");
-    fprintf(f, "      <geometry><mesh filename=\"arm_ros.obj\"/></geometry>\n");
+    fprintf(f, "      <geometry><mesh filename=\"" ASSET_URI_PREFIX "arm_ros.obj\"/></geometry>\n");
     fprintf(f, "      <material name=\"LeftArm_material\"><color rgba=\"0.45 0.45 0.55 1.0\"/></material>\n");
     fprintf(f, "    </visual>\n");
     fprintf(f, "  </link>\n\n");
@@ -337,7 +344,7 @@ static void write_humanoid_urdf(const char *filename) {
     fprintf(f, "  </joint>\n\n");
     fprintf(f, "  <link name=\"RightArm\">\n");
     fprintf(f, "    <visual>\n");
-    fprintf(f, "      <geometry><mesh filename=\"arm_ros.obj\"/></geometry>\n");
+    fprintf(f, "      <geometry><mesh filename=\"" ASSET_URI_PREFIX "arm_ros.obj\"/></geometry>\n");
     fprintf(f, "      <material name=\"RightArm_material\"><color rgba=\"0.45 0.45 0.55 1.0\"/></material>\n");
     fprintf(f, "    </visual>\n");
     fprintf(f, "  </link>\n\n");
@@ -351,7 +358,7 @@ static void write_humanoid_urdf(const char *filename) {
     fprintf(f, "  </joint>\n\n");
     fprintf(f, "  <link name=\"LeftLeg\">\n");
     fprintf(f, "    <visual>\n");
-    fprintf(f, "      <geometry><mesh filename=\"leg_ros.obj\"/></geometry>\n");
+    fprintf(f, "      <geometry><mesh filename=\"" ASSET_URI_PREFIX "leg_ros.obj\"/></geometry>\n");
     fprintf(f, "      <material name=\"LeftLeg_material\"><color rgba=\"0.35 0.35 0.45 1.0\"/></material>\n");
     fprintf(f, "    </visual>\n");
     fprintf(f, "  </link>\n\n");
@@ -365,7 +372,7 @@ static void write_humanoid_urdf(const char *filename) {
     fprintf(f, "  </joint>\n\n");
     fprintf(f, "  <link name=\"RightLeg\">\n");
     fprintf(f, "    <visual>\n");
-    fprintf(f, "      <geometry><mesh filename=\"leg_ros.obj\"/></geometry>\n");
+    fprintf(f, "      <geometry><mesh filename=\"" ASSET_URI_PREFIX "leg_ros.obj\"/></geometry>\n");
     fprintf(f, "      <material name=\"RightLeg_material\"><color rgba=\"0.35 0.35 0.45 1.0\"/></material>\n");
     fprintf(f, "    </visual>\n");
     fprintf(f, "  </link>\n\n");
@@ -389,21 +396,26 @@ static void write_quadruped_urdf(const char *filename) {
     fprintf(f, "  gen_humanoid_assets.c가 생성. humanoid.urdf와 같은 좌표 변환\n");
     fprintf(f, "  (ros_xyz = (ours_z, ours_x, ours_y), Y-up -> ROS Z-up)을 적용했다.\n");
     fprintf(f, "  URDF가 담지 못하는 정보(순찰 경로, 트롯 걸음걸이 파라미터 등)는\n");
-    fprintf(f, "  quadruped_extra.yaml을 같이 참고할 것.\n");
+    fprintf(f, "  quadruped_extra.yaml을 같이 참고할 것. 루트 링크 이름이\n");
+    fprintf(f, "  (humanoid.urdf처럼 \"base_link\"가 아니라) \"quad_base_link\"인 이유:\n");
+    fprintf(f, "  humanoid와 4족 로봇을 같은 RViz 장면에 동시에 띄울 때 두 URDF의\n");
+    fprintf(f, "  루트 프레임 이름이 겹치면 TF가 충돌한다 - 다른 링크 이름\n");
+    fprintf(f, "  (Body/Head/... vs QuadBody/QuadHead/...)은 원래부터 겹치지 않으니\n");
+    fprintf(f, "  루트만 구분해주면 충분하다.\n");
     fprintf(f, "-->\n");
     fprintf(f, "<robot name=\"quadruped\">\n\n");
 
-    fprintf(f, "  <link name=\"base_link\"/>\n\n");
+    fprintf(f, "  <link name=\"quad_base_link\"/>\n\n");
 
     fprintf(f, "  <joint name=\"base_to_quadbody\" type=\"fixed\">\n");
-    fprintf(f, "    <parent link=\"base_link\"/>\n");
+    fprintf(f, "    <parent link=\"quad_base_link\"/>\n");
     fprintf(f, "    <child link=\"QuadBody\"/>\n");
     fprintf(f, "    <origin xyz=\"0 0 %.4f\" rpy=\"0 0 0\"/>\n", base_to_body_z);
     fprintf(f, "  </joint>\n\n");
 
     fprintf(f, "  <link name=\"QuadBody\">\n");
     fprintf(f, "    <visual>\n");
-    fprintf(f, "      <geometry><mesh filename=\"quad_body_ros.obj\"/></geometry>\n");
+    fprintf(f, "      <geometry><mesh filename=\"" ASSET_URI_PREFIX "quad_body_ros.obj\"/></geometry>\n");
     fprintf(f, "      <material name=\"QuadBody_material\"><color rgba=\"0.50 0.55 0.60 1.0\"/></material>\n");
     fprintf(f, "    </visual>\n");
     fprintf(f, "  </link>\n\n");
@@ -416,7 +428,7 @@ static void write_quadruped_urdf(const char *filename) {
 
     fprintf(f, "  <link name=\"QuadHead\">\n");
     fprintf(f, "    <visual>\n");
-    fprintf(f, "      <geometry><mesh filename=\"quad_head_ros.obj\"/></geometry>\n");
+    fprintf(f, "      <geometry><mesh filename=\"" ASSET_URI_PREFIX "quad_head_ros.obj\"/></geometry>\n");
     fprintf(f, "      <material name=\"QuadHead_material\"><color rgba=\"0.60 0.62 0.65 1.0\"/></material>\n");
     fprintf(f, "    </visual>\n");
     fprintf(f, "  </link>\n\n");
@@ -436,7 +448,7 @@ static void write_quadruped_urdf(const char *filename) {
             fprintf(f, "  </joint>\n\n");
             fprintf(f, "  <link name=\"%s\">\n", leg_names[i]);
             fprintf(f, "    <visual>\n");
-            fprintf(f, "      <geometry><mesh filename=\"quad_leg_ros.obj\"/></geometry>\n");
+            fprintf(f, "      <geometry><mesh filename=\"" ASSET_URI_PREFIX "quad_leg_ros.obj\"/></geometry>\n");
             fprintf(f, "      <material name=\"%s_material\"><color rgba=\"0.35 0.35 0.40 1.0\"/></material>\n", leg_names[i]);
             fprintf(f, "    </visual>\n");
             fprintf(f, "  </link>\n\n");
@@ -549,11 +561,12 @@ static void write_humanoid_extra_yaml(const char *filename) {
     fprintf(f, "  - 4족 로봇 (별도 quadruped.urdf + quadruped_extra.yaml)\n\n");
 
     fprintf(f, "mesh_filename_note: >\n");
-    fprintf(f, "  humanoid.urdf의 <mesh filename=\"...\">들은 지금은 상대 경로(예:\n");
-    fprintf(f, "  body_ros.obj)만 적어뒀다. 실제로 robot_state_publisher/RViz2에서\n");
-    fprintf(f, "  띄우려면 ROS 패키지를 만들어 package://<pkg>/... 로 바꾸거나,\n");
-    fprintf(f, "  절대경로 file:///... 로 바꿔야 한다 (이번 작업 범위는 파일 생성까지라\n");
-    fprintf(f, "  그 설정은 하지 않았다).\n");
+    fprintf(f, "  humanoid.urdf의 <mesh filename=\"...\">들은 이 머신에서의 절대경로를\n");
+    fprintf(f, "  file:// URI로 박아 넣었다 (ASSET_URI_PREFIX,\n");
+    fprintf(f, "  file:///D:/claude_test/computer_graphics/). 이 프로젝트가 아직\n");
+    fprintf(f, "  ROS 패키지가 아니라 package://를 쓸 수 없어서 고른 방법이다.\n");
+    fprintf(f, "  프로젝트 폴더를 다른 경로로 옮기면 gen_humanoid_assets.c의\n");
+    fprintf(f, "  ASSET_URI_PREFIX를 고치고 다시 생성해야 한다.\n");
 
     fclose(f);
     printf("wrote %s\n", filename);
@@ -572,6 +585,12 @@ static void write_quadruped_extra_yaml(const char *filename) {
     fprintf(f, "  source: \"humanoid_test.c / humanoid_loader_test.c (Y-up: X=left, Y=up, Z=forward)\"\n");
     fprintf(f, "  urdf: \"ROS REP-103 (Z-up: X=forward, Y=left, Z=up)\"\n");
     fprintf(f, "  mapping: \"ros_xyz = (ours_z, ours_x, ours_y)\"\n\n");
+
+    fprintf(f, "root_link_name: quad_base_link\n");
+    fprintf(f, "root_link_name_note: >\n");
+    fprintf(f, "  humanoid.urdf의 루트는 \"base_link\"인데 quadruped.urdf의 루트는\n");
+    fprintf(f, "  \"quad_base_link\"다 - 두 로봇을 같은 RViz 장면/TF 트리에 동시에\n");
+    fprintf(f, "  띄울 때 루트 프레임 이름이 겹치면 TF가 충돌하기 때문에 다르게 뒀다.\n\n");
 
     fprintf(f, "materials:\n");
     fprintf(f, "  # 4족 로봇은 땅/나무와 마찬가지로 체커 텍스처와 분리된 단색만 쓴다\n");
@@ -611,8 +630,8 @@ static void write_quadruped_extra_yaml(const char *filename) {
     fprintf(f, "  - humanoid 캐릭터 (별도 humanoid.urdf + humanoid_extra.yaml)\n\n");
 
     fprintf(f, "mesh_filename_note: >\n");
-    fprintf(f, "  humanoid_extra.yaml의 mesh_filename_note와 동일 - package:// 또는\n");
-    fprintf(f, "  file:///... 로 바꿔야 robot_state_publisher/RViz2에서 메쉬를 찾는다.\n");
+    fprintf(f, "  humanoid_extra.yaml의 mesh_filename_note와 동일 - 이 머신 절대경로의\n");
+    fprintf(f, "  file:// URI를 그대로 박아 넣었다 (ASSET_URI_PREFIX).\n");
 
     fclose(f);
     printf("wrote %s\n", filename);
