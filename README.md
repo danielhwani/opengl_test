@@ -497,6 +497,44 @@ humanoid 몸을 그리는 함수(`draw_humanoid_body()` /
 실제로 띄우는 ROS2 노드는 아직 없다(환경은 Windows용 ROS2 Humble
 바이너리 설치본으로 확인했음).
 
+### 어떤 렌더링에 어떤 파일이 필요한가
+
+OpenGL 데모와 RViz2는 필요한 파일 조합이 다르다:
+
+- **OpenGL 로더(`humanoid_loader_test.c`)**: OBJ + `humanoid_scene.txt`.
+  OBJ 로더가 `v`/`vn`/`f`만 읽는 최소 구현이라(`vt`/재질은 안 읽음),
+  색은 OBJ가 아니라 `humanoid_scene.txt`의 `r g b` 컬럼에서 온다.
+  OBJ "만" 있다고 되는 게 아니다.
+- **RViz2**: `humanoid.urdf`/`quadruped.urdf` + `*_ros.obj` + `*_ros.mtl`.
+  `robot_state_publisher`가 URDF를 읽어 `<mesh>` 경로로 `*_ros.obj`를
+  불러오는데, 그 메쉬 로더(Ogre/assimp)가 URDF의 `<material>` 색을
+  무시하고 메쉬 자체의 재질을 우선하는 것으로 보여서(아래 "RViz2
+  스킨 문제" 참고), `.mtl`까지 같이 있어야 색이 제대로 보인다.
+
+**`.mtl`은 YAML에서 만든 것도, OBJ에서 뽑아낸 것도 아니다.** 셋 다
+`gen_humanoid_assets.c` 맨 위의 같은 `Color` 상수(`COLOR_BODY` 등,
+위 "색을 한 곳으로 모음" 참고)에서 각자 독립적으로 나온다:
+
+```
+COLOR_BODY (gen_humanoid_assets.c의 상수, 하나)
+   +-> write_scene()          -> humanoid_scene.txt 에 색 기록
+   +-> write_humanoid_urdf()  -> humanoid.urdf의 <material> 에 색 기록
+   +-> write_mtl()            -> body_ros.mtl 에 색 기록
+```
+
+`bake_material_into_obj()`가 하는 일은 OBJ에서 색을 읽어내는 게
+아니라, 이미 geometry만 들고 있던 `body_ros.obj`(색 정보 자체가
+없음)를 다시 열어서 맨 위에 `mtllib body_ros.mtl` 한 줄을 끼워
+넣어 "이 메쉬를 그릴 때 저 mtl을 참조해라"는 **포인터**만 심는
+것뿐이다 - OBJ가 색을 "갖게" 되는 게 아니라 옆의 `.mtl`을
+가리키게 될 뿐이다.
+
+`humanoid_extra.yaml`의 `materials:` 섹션은 이것과 완전히 다른 색
+이야기다 - `humanoid_test.c`가 셔츠/피부/바지에 입히는 **절차적
+텍스처**의 색(지금 `.mtl`/URDF/`humanoid_scene.txt`가 쓰는 "부위
+기본 단색"과는 별개 개념)을 적어둔 것이라, 위 데이터 흐름과는
+전혀 연결되어 있지 않다.
+
 ### 왜 YAML이 따로 필요한가
 
 URDF는 로봇의 정적인 뼈대(링크-관절 계층)와 겉모습(메쉬+단색)만
