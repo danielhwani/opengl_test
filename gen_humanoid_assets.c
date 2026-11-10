@@ -76,6 +76,24 @@
 #define LEG_JOINT_LIMIT_RAD (35.0 * PI / 180.0)
 #define QUAD_LEG_JOINT_LIMIT_RAD (45.0 * PI / 180.0)
 
+/* 부위별 색 - 한 곳에서만 정의한다. write_scene()(humanoid_scene.txt,
+   OpenGL 로더 버전이 읽음), write_humanoid_urdf()/write_quadruped_urdf()
+   (URDF <material>), main()의 bake_material_into_obj() 호출(*_ros.obj에
+   박아 넣는 .mtl)이 전부 이 상수들만 참조한다. 예전에는 이 세 군데에
+   같은 색을 리터럴로 따로따로 적어서, 색을 바꾸려면 세 곳을 전부
+   손으로 맞춰야 했다 - 손으로 맞추다 보면 어긋나기 쉬우므로
+   한 곳으로 모았다. */
+typedef struct { double r, g, b; } Color;
+
+static const Color COLOR_BODY      = {0.55, 0.55, 0.65};
+static const Color COLOR_HEAD      = {0.85, 0.75, 0.65};
+static const Color COLOR_ARM       = {0.45, 0.45, 0.55};
+static const Color COLOR_LEG       = {0.35, 0.35, 0.45};
+static const Color COLOR_NOSE      = {0.85, 0.25, 0.25};
+static const Color COLOR_QUAD_BODY = {0.50, 0.55, 0.60};
+static const Color COLOR_QUAD_HEAD = {0.60, 0.62, 0.65};
+static const Color COLOR_QUAD_LEG  = {0.35, 0.35, 0.40};
+
 static void write_quad(FILE *f, int *vcount,
                         double p1[3], double p2[3], double p3[3], double p4[3],
                         double n[3]) {
@@ -288,25 +306,37 @@ static void write_scene(const char *filename) {
     FILE *f = fopen(filename, "w");
     if (!f) { perror(filename); return; }
     fprintf(f, "# name     mesh       parent  tx       ty       tz  joint  r     g     b\n");
-    fprintf(f, "Body       body.obj   ROOT    0.0      %.4f    0.0  NONE   0.55  0.55  0.65\n", BODY_H / 2.0);
-    fprintf(f, "Head       head.obj   Body    0.0      %.4f    0.0  NONE   0.85  0.75  0.65\n", BODY_H / 2.0);
-    fprintf(f, "LeftArm    arm.obj    Body    %.4f     %.4f    0.0  ROTX   0.45  0.45  0.55\n", -SHOULDER_X, BODY_H / 2.0);
-    fprintf(f, "RightArm   arm.obj    Body    %.4f     %.4f    0.0  ROTX   0.45  0.45  0.55\n", SHOULDER_X, BODY_H / 2.0);
-    fprintf(f, "LeftLeg    leg.obj    Body    %.4f     %.4f    0.0  ROTX   0.35  0.35  0.45\n", -HIP_X, -BODY_H / 2.0);
-    fprintf(f, "RightLeg   leg.obj    Body    %.4f     %.4f    0.0  ROTX   0.35  0.35  0.45\n", HIP_X, -BODY_H / 2.0);
+    fprintf(f, "Body       body.obj   ROOT    0.0      %.4f    0.0  NONE   %.2f  %.2f  %.2f\n",
+            BODY_H / 2.0, COLOR_BODY.r, COLOR_BODY.g, COLOR_BODY.b);
+    fprintf(f, "Head       head.obj   Body    0.0      %.4f    0.0  NONE   %.2f  %.2f  %.2f\n",
+            BODY_H / 2.0, COLOR_HEAD.r, COLOR_HEAD.g, COLOR_HEAD.b);
+    fprintf(f, "LeftArm    arm.obj    Body    %.4f     %.4f    0.0  ROTX   %.2f  %.2f  %.2f\n",
+            -SHOULDER_X, BODY_H / 2.0, COLOR_ARM.r, COLOR_ARM.g, COLOR_ARM.b);
+    fprintf(f, "RightArm   arm.obj    Body    %.4f     %.4f    0.0  ROTX   %.2f  %.2f  %.2f\n",
+            SHOULDER_X, BODY_H / 2.0, COLOR_ARM.r, COLOR_ARM.g, COLOR_ARM.b);
+    fprintf(f, "LeftLeg    leg.obj    Body    %.4f     %.4f    0.0  ROTX   %.2f  %.2f  %.2f\n",
+            -HIP_X, -BODY_H / 2.0, COLOR_LEG.r, COLOR_LEG.g, COLOR_LEG.b);
+    fprintf(f, "RightLeg   leg.obj    Body    %.4f     %.4f    0.0  ROTX   %.2f  %.2f  %.2f\n",
+            HIP_X, -BODY_H / 2.0, COLOR_LEG.r, COLOR_LEG.g, COLOR_LEG.b);
 
     /* 4족 로봇: QUAD_ROOT는 humanoid의 ROOT와는 별개의 가상 부모다.
        humanoid_loader_test.c가 draw_quadruped()에서
        render_children("QUAD_ROOT")를 직접 호출하면서 자기만의
        이동/회전(순찰 위치)을 미리 곱해두기 때문에, humanoid의 걷기
        변환과는 전혀 섞이지 않는다. */
-    fprintf(f, "QuadBody   quad_body.obj  QUAD_ROOT  0.0      %.4f    0.0  NONE   0.50  0.55  0.60\n", QUAD_BODY_H / 2.0);
-    fprintf(f, "QuadHead   quad_head.obj  QuadBody   0.0      %.4f    %.4f  NONE   0.60  0.62  0.65\n",
-            QUAD_BODY_H * 0.15, QUAD_BODY_L / 2.0 + QUAD_HEAD_SIZE * 0.45);
-    fprintf(f, "QuadLegFL  quad_leg.obj   QuadBody   %.4f     0.0      %.4f  ROTX   0.35  0.35  0.40\n", -QUAD_HIP_X, QUAD_HIP_Z_FRONT);
-    fprintf(f, "QuadLegFR  quad_leg.obj   QuadBody   %.4f     0.0      %.4f  ROTX   0.35  0.35  0.40\n", QUAD_HIP_X, QUAD_HIP_Z_FRONT);
-    fprintf(f, "QuadLegBL  quad_leg.obj   QuadBody   %.4f     0.0      %.4f  ROTX   0.35  0.35  0.40\n", -QUAD_HIP_X, QUAD_HIP_Z_BACK);
-    fprintf(f, "QuadLegBR  quad_leg.obj   QuadBody   %.4f     0.0      %.4f  ROTX   0.35  0.35  0.40\n", QUAD_HIP_X, QUAD_HIP_Z_BACK);
+    fprintf(f, "QuadBody   quad_body.obj  QUAD_ROOT  0.0      %.4f    0.0  NONE   %.2f  %.2f  %.2f\n",
+            QUAD_BODY_H / 2.0, COLOR_QUAD_BODY.r, COLOR_QUAD_BODY.g, COLOR_QUAD_BODY.b);
+    fprintf(f, "QuadHead   quad_head.obj  QuadBody   0.0      %.4f    %.4f  NONE   %.2f  %.2f  %.2f\n",
+            QUAD_BODY_H * 0.15, QUAD_BODY_L / 2.0 + QUAD_HEAD_SIZE * 0.45,
+            COLOR_QUAD_HEAD.r, COLOR_QUAD_HEAD.g, COLOR_QUAD_HEAD.b);
+    fprintf(f, "QuadLegFL  quad_leg.obj   QuadBody   %.4f     0.0      %.4f  ROTX   %.2f  %.2f  %.2f\n",
+            -QUAD_HIP_X, QUAD_HIP_Z_FRONT, COLOR_QUAD_LEG.r, COLOR_QUAD_LEG.g, COLOR_QUAD_LEG.b);
+    fprintf(f, "QuadLegFR  quad_leg.obj   QuadBody   %.4f     0.0      %.4f  ROTX   %.2f  %.2f  %.2f\n",
+            QUAD_HIP_X, QUAD_HIP_Z_FRONT, COLOR_QUAD_LEG.r, COLOR_QUAD_LEG.g, COLOR_QUAD_LEG.b);
+    fprintf(f, "QuadLegBL  quad_leg.obj   QuadBody   %.4f     0.0      %.4f  ROTX   %.2f  %.2f  %.2f\n",
+            -QUAD_HIP_X, QUAD_HIP_Z_BACK, COLOR_QUAD_LEG.r, COLOR_QUAD_LEG.g, COLOR_QUAD_LEG.b);
+    fprintf(f, "QuadLegBR  quad_leg.obj   QuadBody   %.4f     0.0      %.4f  ROTX   %.2f  %.2f  %.2f\n",
+            QUAD_HIP_X, QUAD_HIP_Z_BACK, COLOR_QUAD_LEG.r, COLOR_QUAD_LEG.g, COLOR_QUAD_LEG.b);
 
     fclose(f);
     printf("wrote %s\n", filename);
@@ -371,7 +401,8 @@ static void write_humanoid_urdf(const char *filename) {
     fprintf(f, "  <link name=\"Body\">\n");
     fprintf(f, "    <visual>\n");
     fprintf(f, "      <geometry><mesh filename=\"" ASSET_URI_PREFIX "body_ros.obj\"/></geometry>\n");
-    fprintf(f, "      <material name=\"Body_material\"><color rgba=\"0.55 0.55 0.65 1.0\"/></material>\n");
+    fprintf(f, "      <material name=\"Body_material\"><color rgba=\"%.2f %.2f %.2f 1.0\"/></material>\n",
+            COLOR_BODY.r, COLOR_BODY.g, COLOR_BODY.b);
     fprintf(f, "    </visual>\n");
     fprintf(f, "  </link>\n\n");
 
@@ -384,7 +415,8 @@ static void write_humanoid_urdf(const char *filename) {
     fprintf(f, "  <link name=\"Head\">\n");
     fprintf(f, "    <visual>\n");
     fprintf(f, "      <geometry><mesh filename=\"" ASSET_URI_PREFIX "head_ros.obj\"/></geometry>\n");
-    fprintf(f, "      <material name=\"Head_material\"><color rgba=\"0.85 0.75 0.65 1.0\"/></material>\n");
+    fprintf(f, "      <material name=\"Head_material\"><color rgba=\"%.2f %.2f %.2f 1.0\"/></material>\n",
+            COLOR_HEAD.r, COLOR_HEAD.g, COLOR_HEAD.b);
     fprintf(f, "    </visual>\n");
     fprintf(f, "    <!-- 코: humanoid_test.c의 draw_head()에서는 OBJ 메쉬가 아니라 매\n");
     fprintf(f, "         프레임 따로 그리던 작은 빨간 구였다. URDF에서는 프리미티브로\n");
@@ -392,7 +424,8 @@ static void write_humanoid_urdf(const char *filename) {
     fprintf(f, "    <visual>\n");
     fprintf(f, "      <origin xyz=\"%.4f 0 %.4f\" rpy=\"0 0 0\"/>\n", nose_x, nose_z);
     fprintf(f, "      <geometry><sphere radius=\"%.4f\"/></geometry>\n", nose_r);
-    fprintf(f, "      <material name=\"Nose_material\"><color rgba=\"0.85 0.25 0.25 1.0\"/></material>\n");
+    fprintf(f, "      <material name=\"Nose_material\"><color rgba=\"%.2f %.2f %.2f 1.0\"/></material>\n",
+            COLOR_NOSE.r, COLOR_NOSE.g, COLOR_NOSE.b);
     fprintf(f, "    </visual>\n");
     fprintf(f, "  </link>\n\n");
 
@@ -406,7 +439,8 @@ static void write_humanoid_urdf(const char *filename) {
     fprintf(f, "  <link name=\"LeftArm\">\n");
     fprintf(f, "    <visual>\n");
     fprintf(f, "      <geometry><mesh filename=\"" ASSET_URI_PREFIX "arm_ros.obj\"/></geometry>\n");
-    fprintf(f, "      <material name=\"LeftArm_material\"><color rgba=\"0.45 0.45 0.55 1.0\"/></material>\n");
+    fprintf(f, "      <material name=\"LeftArm_material\"><color rgba=\"%.2f %.2f %.2f 1.0\"/></material>\n",
+            COLOR_ARM.r, COLOR_ARM.g, COLOR_ARM.b);
     fprintf(f, "    </visual>\n");
     fprintf(f, "  </link>\n\n");
 
@@ -420,7 +454,8 @@ static void write_humanoid_urdf(const char *filename) {
     fprintf(f, "  <link name=\"RightArm\">\n");
     fprintf(f, "    <visual>\n");
     fprintf(f, "      <geometry><mesh filename=\"" ASSET_URI_PREFIX "arm_ros.obj\"/></geometry>\n");
-    fprintf(f, "      <material name=\"RightArm_material\"><color rgba=\"0.45 0.45 0.55 1.0\"/></material>\n");
+    fprintf(f, "      <material name=\"RightArm_material\"><color rgba=\"%.2f %.2f %.2f 1.0\"/></material>\n",
+            COLOR_ARM.r, COLOR_ARM.g, COLOR_ARM.b);
     fprintf(f, "    </visual>\n");
     fprintf(f, "  </link>\n\n");
 
@@ -434,7 +469,8 @@ static void write_humanoid_urdf(const char *filename) {
     fprintf(f, "  <link name=\"LeftLeg\">\n");
     fprintf(f, "    <visual>\n");
     fprintf(f, "      <geometry><mesh filename=\"" ASSET_URI_PREFIX "leg_ros.obj\"/></geometry>\n");
-    fprintf(f, "      <material name=\"LeftLeg_material\"><color rgba=\"0.35 0.35 0.45 1.0\"/></material>\n");
+    fprintf(f, "      <material name=\"LeftLeg_material\"><color rgba=\"%.2f %.2f %.2f 1.0\"/></material>\n",
+            COLOR_LEG.r, COLOR_LEG.g, COLOR_LEG.b);
     fprintf(f, "    </visual>\n");
     fprintf(f, "  </link>\n\n");
 
@@ -448,7 +484,8 @@ static void write_humanoid_urdf(const char *filename) {
     fprintf(f, "  <link name=\"RightLeg\">\n");
     fprintf(f, "    <visual>\n");
     fprintf(f, "      <geometry><mesh filename=\"" ASSET_URI_PREFIX "leg_ros.obj\"/></geometry>\n");
-    fprintf(f, "      <material name=\"RightLeg_material\"><color rgba=\"0.35 0.35 0.45 1.0\"/></material>\n");
+    fprintf(f, "      <material name=\"RightLeg_material\"><color rgba=\"%.2f %.2f %.2f 1.0\"/></material>\n",
+            COLOR_LEG.r, COLOR_LEG.g, COLOR_LEG.b);
     fprintf(f, "    </visual>\n");
     fprintf(f, "  </link>\n\n");
 
@@ -491,7 +528,8 @@ static void write_quadruped_urdf(const char *filename) {
     fprintf(f, "  <link name=\"QuadBody\">\n");
     fprintf(f, "    <visual>\n");
     fprintf(f, "      <geometry><mesh filename=\"" ASSET_URI_PREFIX "quad_body_ros.obj\"/></geometry>\n");
-    fprintf(f, "      <material name=\"QuadBody_material\"><color rgba=\"0.50 0.55 0.60 1.0\"/></material>\n");
+    fprintf(f, "      <material name=\"QuadBody_material\"><color rgba=\"%.2f %.2f %.2f 1.0\"/></material>\n",
+            COLOR_QUAD_BODY.r, COLOR_QUAD_BODY.g, COLOR_QUAD_BODY.b);
     fprintf(f, "    </visual>\n");
     fprintf(f, "  </link>\n\n");
 
@@ -504,7 +542,8 @@ static void write_quadruped_urdf(const char *filename) {
     fprintf(f, "  <link name=\"QuadHead\">\n");
     fprintf(f, "    <visual>\n");
     fprintf(f, "      <geometry><mesh filename=\"" ASSET_URI_PREFIX "quad_head_ros.obj\"/></geometry>\n");
-    fprintf(f, "      <material name=\"QuadHead_material\"><color rgba=\"0.60 0.62 0.65 1.0\"/></material>\n");
+    fprintf(f, "      <material name=\"QuadHead_material\"><color rgba=\"%.2f %.2f %.2f 1.0\"/></material>\n",
+            COLOR_QUAD_HEAD.r, COLOR_QUAD_HEAD.g, COLOR_QUAD_HEAD.b);
     fprintf(f, "    </visual>\n");
     fprintf(f, "  </link>\n\n");
 
@@ -524,7 +563,8 @@ static void write_quadruped_urdf(const char *filename) {
             fprintf(f, "  <link name=\"%s\">\n", leg_names[i]);
             fprintf(f, "    <visual>\n");
             fprintf(f, "      <geometry><mesh filename=\"" ASSET_URI_PREFIX "quad_leg_ros.obj\"/></geometry>\n");
-            fprintf(f, "      <material name=\"%s_material\"><color rgba=\"0.35 0.35 0.40 1.0\"/></material>\n", leg_names[i]);
+            fprintf(f, "      <material name=\"%s_material\"><color rgba=\"%.2f %.2f %.2f 1.0\"/></material>\n",
+                    leg_names[i], COLOR_QUAD_LEG.r, COLOR_QUAD_LEG.g, COLOR_QUAD_LEG.b);
             fprintf(f, "    </visual>\n");
             fprintf(f, "  </link>\n\n");
         }
@@ -672,9 +712,9 @@ static void write_quadruped_extra_yaml(const char *filename) {
     fprintf(f, "  # (draw_quad_body/head/leg, 또는 로더 버전의 texture_for_part()가\n");
     fprintf(f, "  # Quad* 부위에 대해 0을 반환해 텍스처를 안 입히는 것과 동일).\n");
     fprintf(f, "  # urdf의 material color와 이미 동일하므로 손실은 없다 - 참고용.\n");
-    fprintf(f, "  body_rgb: [0.50, 0.55, 0.60]\n");
-    fprintf(f, "  head_rgb: [0.60, 0.62, 0.65]\n");
-    fprintf(f, "  leg_rgb: [0.35, 0.35, 0.40]\n\n");
+    fprintf(f, "  body_rgb: [%.2f, %.2f, %.2f]\n", COLOR_QUAD_BODY.r, COLOR_QUAD_BODY.g, COLOR_QUAD_BODY.b);
+    fprintf(f, "  head_rgb: [%.2f, %.2f, %.2f]\n", COLOR_QUAD_HEAD.r, COLOR_QUAD_HEAD.g, COLOR_QUAD_HEAD.b);
+    fprintf(f, "  leg_rgb: [%.2f, %.2f, %.2f]\n\n", COLOR_QUAD_LEG.r, COLOR_QUAD_LEG.g, COLOR_QUAD_LEG.b);
 
     fprintf(f, "animation:\n");
     fprintf(f, "  idle_tick_delta_t: 0.004   # t += 0.004 per idle() tick\n");
@@ -757,13 +797,16 @@ int main(void) {
     /* *_ros.obj 각각에 URDF의 <material> 색과 똑같은 색을 담은 .mtl을
        박아 넣는다 - RViz2가 URDF 재질을 무시하고 민무늬로 그리는
        경우가 있어서, 메쉬 자체에도 색을 들려보낸다. */
-    bake_material_into_obj("body_ros.obj", "body_ros.mtl", 0.55, 0.55, 0.65);
-    bake_material_into_obj("head_ros.obj", "head_ros.mtl", 0.85, 0.75, 0.65);
-    bake_material_into_obj("arm_ros.obj", "arm_ros.mtl", 0.45, 0.45, 0.55);
-    bake_material_into_obj("leg_ros.obj", "leg_ros.mtl", 0.35, 0.35, 0.45);
-    bake_material_into_obj("quad_body_ros.obj", "quad_body_ros.mtl", 0.50, 0.55, 0.60);
-    bake_material_into_obj("quad_head_ros.obj", "quad_head_ros.mtl", 0.60, 0.62, 0.65);
-    bake_material_into_obj("quad_leg_ros.obj", "quad_leg_ros.mtl", 0.35, 0.35, 0.40);
+    bake_material_into_obj("body_ros.obj", "body_ros.mtl", COLOR_BODY.r, COLOR_BODY.g, COLOR_BODY.b);
+    bake_material_into_obj("head_ros.obj", "head_ros.mtl", COLOR_HEAD.r, COLOR_HEAD.g, COLOR_HEAD.b);
+    bake_material_into_obj("arm_ros.obj", "arm_ros.mtl", COLOR_ARM.r, COLOR_ARM.g, COLOR_ARM.b);
+    bake_material_into_obj("leg_ros.obj", "leg_ros.mtl", COLOR_LEG.r, COLOR_LEG.g, COLOR_LEG.b);
+    bake_material_into_obj("quad_body_ros.obj", "quad_body_ros.mtl",
+                            COLOR_QUAD_BODY.r, COLOR_QUAD_BODY.g, COLOR_QUAD_BODY.b);
+    bake_material_into_obj("quad_head_ros.obj", "quad_head_ros.mtl",
+                            COLOR_QUAD_HEAD.r, COLOR_QUAD_HEAD.g, COLOR_QUAD_HEAD.b);
+    bake_material_into_obj("quad_leg_ros.obj", "quad_leg_ros.mtl",
+                            COLOR_QUAD_LEG.r, COLOR_QUAD_LEG.g, COLOR_QUAD_LEG.b);
 
     write_humanoid_urdf("humanoid.urdf");
     write_humanoid_extra_yaml("humanoid_extra.yaml");

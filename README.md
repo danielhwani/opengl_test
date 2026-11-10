@@ -594,6 +594,21 @@ OBJ 파일 맨 위에 `mtllib .../usemtl mat0`을 끼워 넣는다 - 메쉬
 자체가 색을 들고 있게 해서, RViz2가 URDF 재질을 어떻게 처리하든
 항상 맞는 색으로 보이게 했다.
 
+그런데 이 색이 `write_scene()`(humanoid_scene.txt), 각 URDF writer
+(`<material>`), `bake_material_into_obj()` 호출까지 세 군데에
+리터럴로 따로따로 박혀 있어서, 색을 하나 바꾸려면 세 곳을 전부
+손으로 맞춰야 하는 하드코딩 중복 문제가 있었다. `gen_humanoid_assets.c`
+맨 위에 `Color` 구조체와 `COLOR_BODY`/`COLOR_HEAD`/`COLOR_ARM`/
+`COLOR_LEG`/`COLOR_NOSE`/`COLOR_QUAD_BODY`/`COLOR_QUAD_HEAD`/
+`COLOR_QUAD_LEG` 상수를 한 번만 정의해두고, 위 세 곳(+
+`quadruped_extra.yaml`의 `materials` 메모)이 전부 그 상수만
+참조하도록 고쳤다 - 이제 색을 바꾸려면 그 상수 하나만 고치면
+된다. (humanoid_test.c의 셔츠/피부/바지 **텍스처** 색은 이 정리
+대상이 아니다 - 그건 완전히 다른 파일의, 완전히 다른 개념(절차적
+텍스처 생성 파라미터)이라 `*_extra.yaml`의 `materials.skin/shirt/
+pants`에만 따로 적혀 있고, 이번에 통합한 "부위 기본 단색"과는
+별개로 남아 있다.)
+
 ## 구현 메모
 
 - `glutSolidTeapot()`은 정점(Vertex)/법선(Normal)만 생성하고 텍스처 좌표는
