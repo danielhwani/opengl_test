@@ -571,12 +571,17 @@ Python/rclpy) - `path_sample`(Catmull-Rom)과 걷기/트롯 공식을
 그대로 포팅해서 `world -> base_link` / `world -> quad_base_link`
 TF와 팔다리/다리 관절의 `joint_states`를 발행하고,
 `robot_state_publisher`가 나머지(Body/Head/LeftArm/... 등 모든
-링크의 TF)를 URDF로부터 계산해 채운다. 빌드/실행 방법과 원본
+링크의 TF)를 URDF로부터 계산해 채운다. **Windows용 ROS2 Humble에서
+`colcon build` → `ros2 launch humanoid_sim display.launch.py`로
+실제로 빌드/실행해서 RViz2에 두 로봇이 다 움직이는 것까지
+확인했다.** 빌드/실행 방법, 노드가 정확히 무엇을 발행하는지, 원본
 OpenGL 데모와 다른 점(키보드 조작·클론·배경 미포함 등)은 그
-패키지의 `README.md`에 있다. **이 세션에는 colcon/ros2 환경이
-없어서 Python 헬퍼 함수(경로/순찰 계산)만 단위 테스트로
-확인했고, 실제 ROS2 Humble에서 빌드·실행·RViz2 표시까지는
-검증하지 못했다** - 사용자가 자신의 ROS2 셸에서 확인해야 한다.
+패키지의 `README.md`에 있다.
+
+빌드 중 `setup.py`/`package.xml`에 한글이 들어 있으면 colcon이
+Windows 한국어 로캘의 기본 코드페이지(cp949)로 그 파일을 읽으려다
+UTF-8 한글을 디코딩 못 해 에러가 나는 걸 발견해서, 그 두 파일의
+설명문만 영어로 바꿨다 (코드/URDF 쪽 한글 주석은 영향 없음).
 
 ## 구현 메모
 
