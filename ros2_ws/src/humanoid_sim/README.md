@@ -87,11 +87,14 @@ ros2 launch humanoid_sim display.launch.py assets_dir:=D:/다른/경로/computer
 publisher`/`quadruped_state_publisher`가 발행하는 실시간 TF
 ("world"->"Body", "world"->"QuadBody")를 읽어서, 지금 걷고 있는
 humanoid와 순찰 중인 4족 로봇의 몸통(MuJoCo의 "mocap" 바디 - 물리
-영향은 안 받지만 충돌에는 참여)과 실제로 부딪힌다. 공이 바닥 밑으로
-떨어지면 둘 중 한쪽 위에서 다시 떨어뜨려서 반복한다. 결과는
-`/physics_markers`(공 + 반투명 충돌 프록시 2개)와 `world -> ball`
-TF로 RViz2에 보여준다. 자세한 설계는 `mujoco_ball_sim.py`와
-`mujoco/ball_collision.xml`의 docstring/주석 참고.
+영향은 안 받지만 충돌에는 참여)과 실제로 부딪힌다. **3초(`RESPAWN_
+INTERVAL_SEC`)마다 둘 중 한쪽 바로 위에서 공을 다시 떨어뜨린다** -
+처음엔 "바닥 아래로 떨어졌을 때만" 다시 떨어뜨리게 해놨는데, 빈
+바닥에 착지해서 가만히 멈추면 그 조건을 다시는 만족 못 해 공이
+영원히 멈춰버리는 버그가 있었다. 결과는 `/physics_markers`(공 +
+반투명 충돌 프록시 2개)와 `world -> ball` TF로 RViz2에 보여준다.
+자세한 설계는 `mujoco_ball_sim.py`와 `mujoco/ball_collision.xml`의
+docstring/주석 참고.
 
 **중요 - MuJoCo는 rosdep으로 안 받아진다.** `mujoco_ball_sim`은 pip
 패키지 `mujoco`가 필요한데, `colcon build`가 생성하는 각 노드의

@@ -13,9 +13,12 @@ quad_proxy)의 자세로 그대로 복사해 넣는다. mocap 바디는 물리
 "지금 이 순간 걷고 있는 humanoid/순찰 중인 4족 로봇의 몸통" 노릇을
 한다. 공(ball)만 진짜 물리 바디(자유낙하 + 중력 + 충돌 반응)다.
 
-공이 바닥 밑으로 너무 떨어지면(둘 중 하나와 충돌하지 않고 빗나간
-경우) 둘 중 한쪽 몸통 위로 다시 떨어뜨린다 - 매번 실제로 부딪히는
-모습을 보려는 의도.
+공은 RESPAWN_INTERVAL_SEC마다 주기적으로 다시 떨어뜨린다(둘 중
+한쪽 몸통 바로 위에서) - 그냥 바닥 아래로 떨어졌을 때만 리스폰하면,
+빈 바닥에 착지해서 가만히 멈춘 뒤로는 다시는 안 떨어지는 문제가
+있었다(처음엔 이 버그가 있었다). 바닥 아래로 떨어지는 경우도
+추가로 체크하긴 하지만, 그건 혹시 모를 예외 상황(장면 밖으로
+튕겨나가는 등) 대비용이고 실제로는 주기적 리스폰이 매번 작동한다.
 
 결과는 두 가지로 RViz2에 보여준다:
   - TF: "world" -> "ball" (공의 실제 물리 위치/자세)
@@ -45,7 +48,8 @@ import mujoco
 TIMER_PERIOD_SEC = 0.01     # 100 Hz
 PHYSICS_SUBSTEPS = 2        # MJCF의 timestep(0.005)과 곱해서 0.01s를 채움
 
-FALL_RESET_Z = -2.0         # 이 높이보다 낮아지면 다시 떨어뜨림
+FALL_RESET_Z = -2.0         # 이 높이보다 낮아지면 다시 떨어뜨림 (예외 상황 대비)
+RESPAWN_INTERVAL_SEC = 3.0  # 이 주기마다 항상 다시 떨어뜨림 (주된 트리거)
 RESPAWN_HEIGHT_OFFSET = 2.0  # 고른 몸통 위 이만큼 높은 곳에서 다시 떨어뜨림
 RESPAWN_JITTER = 0.3        # 몸통 중심에서 좌우로 흔드는 정도(m)
 
@@ -97,6 +101,7 @@ class MujocoBallSim(Node):
 
         self.humanoid_pose_known = False
         self.quad_pose_known = False
+        self.last_respawn_time = self.get_clock().now()
 
         self.timer = self.create_timer(TIMER_PERIOD_SEC, self.on_timer)
         self.get_logger().info(f"MuJoCo 모델 로드: {mjcf_path}")
@@ -115,9 +120,10 @@ class MujocoBallSim(Node):
         return True
 
     def respawn_ball(self):
-        """공이 바닥 아래로 너무 떨어지면, 둘 중 한쪽 몸통 바로 위에서
-        다시 떨어뜨린다 - 매번 실제로 부딪히는 모습을 보여주려는
-        의도."""
+        """둘 중 한쪽 몸통 바로 위에서 공을 다시 떨어뜨린다 - 매번
+        실제로 부딪히는 모습을 보여주려는 의도. on_timer()가
+        RESPAWN_INTERVAL_SEC마다 주기적으로 부르거나(주된 트리거),
+        공이 FALL_RESET_Z보다 낮게 떨어진 예외 상황에서 부른다."""
         candidates = []
         if self.humanoid_pose_known:
             candidates.append(self.data.mocap_pos[self.humanoid_mocap_idx])
@@ -148,13 +154,16 @@ class MujocoBallSim(Node):
         for _ in range(PHYSICS_SUBSTEPS):
             mujoco.mj_step(self.model, self.data)
 
+        now = self.get_clock().now()
+        elapsed_since_respawn = (now - self.last_respawn_time).nanoseconds / 1e9
+
         ball_pos = self.data.xpos[self.ball_body_id]
-        if ball_pos[2] < FALL_RESET_Z:
+        if ball_pos[2] < FALL_RESET_Z or elapsed_since_respawn > RESPAWN_INTERVAL_SEC:
             self.respawn_ball()
+            self.last_respawn_time = now
             ball_pos = self.data.xpos[self.ball_body_id]
 
         ball_quat = self.data.xquat[self.ball_body_id]  # mujoco: w,x,y,z
-        now = self.get_clock().now()
 
         tf = TransformStamped()
         tf.header.stamp = now.to_msg()
