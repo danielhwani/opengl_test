@@ -31,23 +31,28 @@
  *   gcc humanoid_test.c -o humanoid_test.exe -lfreeglut -lopengl32 -lglu32 -lwinmm
  *
  * 조작:
- *   스페이스바 : 자동 애니메이션 on/off
- *   Q / A      : 왼팔 각도 직접 조정 (자동 애니메이션은 자동으로 꺼짐)
+ *   Q / A      : 왼팔 각도 직접 조정 (팔다리 자동 스윙은 자동으로 꺼짐)
  *   E / D      : 오른팔 각도 직접 조정
  *   Z / X      : 왼다리 각도 직접 조정
  *   C / V      : 오른다리 각도 직접 조정
  *   T          : 텍스처 on/off
  *   L          : 조명 on/off
- *   방향키 위/아래 : 몸통 전진/후진 (자동 애니메이션은 자동으로 꺼짐)
- *   방향키 좌/우  : 몸통 좌/우 회전
- *
- * 자동 애니메이션일 때 몸통은 humanoid_path.txt에 적힌 웨이포인트
- * ("x z" 한 줄씩, 마지막 점에서 첫 점으로 돌아와 폐곡선을 이룸)를
- * 순서대로 따라 걷는다. 파일이 없으면 기본 사각형 경로를 쓴다.
+ *   방향키 위/아래 : 주인공 전진/후진 (수동 조작 모드로 전환됨)
+ *   방향키 좌/우  : 주인공 좌/우 회전 (수동 조작 모드로 전환됨)
+ *   스페이스바 : 주인공을 그 자리에 정지시킴
+ *   P          : 주인공을 다시 humanoid_path.txt 경로를 따라 걷게 함
  *   마우스 왼쪽 드래그 : 카메라 궤도 회전
  *   마우스 휠        : 줌 인/아웃
- *   R          : 각도 초기화
+ *   R          : 위치/각도 초기화 (경로 모드로 복귀)
  *   ESC        : 종료
+ *
+ * 주인공은 세 가지 모드 중 하나다 - 경로 자동 추적(기본값), 방향키로
+ * 직접 조작하는 수동 모드, 스페이스바로 그 자리에 세워두는 정지 모드.
+ * 방향키를 누르면 수동 모드로, P를 누르면 다시 경로 모드로 돌아간다.
+ * 경로 모드일 때 humanoid_path.txt에 적힌 웨이포인트("x z" 한 줄씩,
+ * 마지막 점에서 첫 점으로 돌아와 폐곡선을 이룸)를 순서대로 따라
+ * 걷는다 (파일이 없으면 기본 사각형 경로를 씀). 클론 캐릭터와
+ * 4족 로봇은 주인공의 모드와 무관하게 항상 똑같이 움직인다.
  */
 
 #include <GL/freeglut.h>
@@ -84,7 +89,25 @@ static double right_leg_angle = 0.0;
 static double body_x = 0.0;
 static double body_z = 0.0;
 static double body_heading = 0.0; /* degrees, y축 둘레 회전 */
-static int animate = 1;
+
+/* 팔다리 스윙(left_angle 등)만 켜고 끄는 플래그 - Q/A/E/D/Z/X/C/V로
+   수동으로 각도를 조절할 때 꺼서 그 값이 바로 다음 틱에 t 기반 계산으로
+   덮어써지지 않게 한다. 주인공의 "걷기 모드"와는 별개다: 클론/4족
+   로봇의 움직임, 그리고 주인공이 경로를 따라 걷는 것 자체는 이
+   플래그와 무관하게 항상 t로부터 계산된다 - 그래야 주인공을 세워두거나
+   수동으로 조작해도 클론/로봇은 계속 움직인다. */
+static int limb_animate = 1;
+
+/* 주인공의 "걷기 모드" - 셋 중 하나:
+   - MAIN_MODE_PATH   : humanoid_path.txt 경로를 자동으로 따라 걷는다 (기본값)
+   - MAIN_MODE_MANUAL : 방향키로 직접 이동/회전시킨다 (경로 무시)
+   - MAIN_MODE_STOPPED: 그 자리에 가만히 세워둔다
+   방향키를 누르면 MANUAL로, 스페이스바를 누르면 STOPPED로, P를 누르면
+   다시 PATH로 전환된다. */
+#define MAIN_MODE_PATH 0
+#define MAIN_MODE_MANUAL 1
+#define MAIN_MODE_STOPPED 2
+static int main_mode = MAIN_MODE_PATH;
 
 /* ---- 경로(path): humanoid_path.txt에서 읽은 웨이포인트(x z)를 순서대로
    잇는 폐곡선을 따라 걷는다. 파일이 없으면 기본 사각형 경로를 쓴다. ---- */
@@ -932,60 +955,74 @@ static void display(void) {
 }
 
 static void idle(void) {
-    if (animate) {
-        t += 0.004;
+    /* t는 항상 전진한다 - 클론/4족 로봇, 그리고 주인공이 경로 모드일
+       때의 위치가 전부 이 t로부터 직접 계산되므로, 주인공을 세워두거나
+       (MAIN_MODE_STOPPED) 수동으로 조작해도(MAIN_MODE_MANUAL) 클론과
+       로봇은 항상 그대로 계속 움직인다 - "동선을 분리"해달라는 요청의
+       핵심이 이 부분이다. */
+    t += 0.004;
+
+    /* 팔다리 스윙만 limb_animate로 따로 켜고 끈다 (Q/A/E/D/Z/X/C/V로
+       수동 포즈를 줄 때 꺼서, 다음 틱에 이 계산이 그 값을 덮어쓰지
+       않게 한다). */
+    if (limb_animate) {
         left_angle = 35.0 * sin(t);
         right_angle = -35.0 * sin(t);   /* 왼팔과 반대 위상 - 걷는 팔처럼 */
         /* 걷는 동작: 왼팔과 같은 쪽 다리가 아니라 반대쪽 팔과 같은 위상으로
            움직여야 자연스럽다 (오른팔이 앞으로 나올 때 왼다리가 앞으로). */
         left_leg_angle = -25.0 * sin(t);
         right_leg_angle = 25.0 * sin(t);
-
-        /* 몸통도 같이 걸어간다: humanoid_path.txt의 웨이포인트를 잇는
-           폐곡선을 따라, 이동 거리(s)를 t에 비례시켜 구한다. 매 틱
-           고정값을 누적시키지 않고 t로부터 직접 계산하므로(path_sample),
-           idle() 호출 빈도(프레임 속도)와 무관하게 항상 같은 속도로 걷는다. */
-        path_sample(0.6 * t, &body_x, &body_z, &body_heading);
-
-        /* 클론들은 같은 경로를 같은 속도로 걷되, 호의 길이(s) 기준으로
-           고르게 떨어진 지점에서 걷는다 - path_total_len을
-           (클론 수+1)로 나눈 간격만큼씩 밀어주면 경로 모양과 무관하게
-           항상 고리 위에 균등하게 퍼진다. */
-        for (int i = 0; i < HUMANOID_CLONE_COUNT; i++) {
-            double offset = path_total_len * (double)(i + 1) / (double)(HUMANOID_CLONE_COUNT + 1);
-            path_sample(0.6 * t + offset, &clone_x[i], &clone_z[i], &clone_heading[i]);
-        }
-
-        /* 4족 로봇은 x축 방향으로만 왕복(patrol)한다 - z는
-           quadruped_patrol.txt에서 읽은 quad_patrol_z로 고정이라
-           humanoid의 걷는 경로(z: -3.5..3.5)와 절대 겹치지 않는다.
-           위치는 sin(), 이동 방향은 그 미분인 cos()의 부호를 따른다:
-           cos > 0이면 +x로 가는 중이라 몸의 forward 벡터(로컬 +Z,
-           heading=90도일 때 세계 +X)가 +x를 향하고, cos < 0이면
-           반대로 -90도를 향해야 한다.
-           cos의 부호가 바뀌는 순간(=왕복 양 끝, 마침 sin이 최대/최소라
-           위치는 거의 멈춰있는 지점) heading을 90 <-> -90으로 그냥
-           뚝 끊어 바꾸면 몸이 순간이동한 것처럼 보인다. 그래서
-           tanh(k*cos(phase))로 완만하게 이어서, cos가 0 근처를 지나는
-           짧은 구간 동안 heading이 90 -> 0(로컬 +Z, 즉 x축에 수직으로
-           선 모습) -> -90으로 부드럽게 돌아가는 "제자리 방향 전환"
-           애니메이션이 저절로 생기게 한다. k가 클수록 전환 구간이
-           좁아져 더 급하게 꺾인다. */
-        double quad_center = (quad_patrol_x_min + quad_patrol_x_max) / 2.0;
-        double quad_half_range = (quad_patrol_x_max - quad_patrol_x_min) / 2.0;
-        double quad_phase = quad_patrol_speed * t;
-        quad_x = quad_center + quad_half_range * sin(quad_phase);
-        quad_heading = 90.0 * tanh(QUAD_TURN_SHARPNESS * cos(quad_phase));
-
-        /* 트롯(trot) 걸음걸이도 같은 t로부터 직접 계산한다 (같은 이유 -
-           idle() 호출 빈도와 무관하게 항상 같은 속도로 흔들리게 하려고).
-           대각선 다리 쌍이 반대 위상. */
-        double quad_swing = 30.0 * sin(2.0 * t);
-        quad_fl_angle = quad_swing;
-        quad_br_angle = quad_swing;
-        quad_fr_angle = -quad_swing;
-        quad_bl_angle = -quad_swing;
     }
+
+    /* 주인공은 경로 모드일 때만 이 t로부터 위치를 다시 계산한다.
+       수동 모드는 special_keys()가 직접 body_x/z/heading을 바꾸고,
+       정지 모드는 아무도 건드리지 않아 그 자리에 그대로 멈춰 있는다. */
+    if (main_mode == MAIN_MODE_PATH) {
+        /* humanoid_path.txt의 웨이포인트를 잇는 폐곡선을 따라, 이동
+           거리(s)를 t에 비례시켜 구한다. 매 틱 고정값을 누적시키지
+           않고 t로부터 직접 계산하므로(path_sample), idle() 호출
+           빈도(프레임 속도)와 무관하게 항상 같은 속도로 걷는다. */
+        path_sample(0.6 * t, &body_x, &body_z, &body_heading);
+    }
+
+    /* 클론들은 주인공의 모드와 무관하게 항상 같은 경로를 같은 속도로
+       걷되, 호의 길이(s) 기준으로 고르게 떨어진 지점에서 걷는다 -
+       path_total_len을 (클론 수+1)로 나눈 간격만큼씩 밀어주면 경로
+       모양과 무관하게 항상 고리 위에 균등하게 퍼진다. */
+    for (int i = 0; i < HUMANOID_CLONE_COUNT; i++) {
+        double offset = path_total_len * (double)(i + 1) / (double)(HUMANOID_CLONE_COUNT + 1);
+        path_sample(0.6 * t + offset, &clone_x[i], &clone_z[i], &clone_heading[i]);
+    }
+
+    /* 4족 로봇은 x축 방향으로만 왕복(patrol)한다 - z는
+       quadruped_patrol.txt에서 읽은 quad_patrol_z로 고정이라
+       humanoid의 걷는 경로(z: -3.5..3.5)와 절대 겹치지 않는다.
+       위치는 sin(), 이동 방향은 그 미분인 cos()의 부호를 따른다:
+       cos > 0이면 +x로 가는 중이라 몸의 forward 벡터(로컬 +Z,
+       heading=90도일 때 세계 +X)가 +x를 향하고, cos < 0이면
+       반대로 -90도를 향해야 한다.
+       cos의 부호가 바뀌는 순간(=왕복 양 끝, 마침 sin이 최대/최소라
+       위치는 거의 멈춰있는 지점) heading을 90 <-> -90으로 그냥
+       뚝 끊어 바꾸면 몸이 순간이동한 것처럼 보인다. 그래서
+       tanh(k*cos(phase))로 완만하게 이어서, cos가 0 근처를 지나는
+       짧은 구간 동안 heading이 90 -> 0(로컬 +Z, 즉 x축에 수직으로
+       선 모습) -> -90으로 부드럽게 돌아가는 "제자리 방향 전환"
+       애니메이션이 저절로 생기게 한다. k가 클수록 전환 구간이
+       좁아져 더 급하게 꺾인다. */
+    double quad_center = (quad_patrol_x_min + quad_patrol_x_max) / 2.0;
+    double quad_half_range = (quad_patrol_x_max - quad_patrol_x_min) / 2.0;
+    double quad_phase = quad_patrol_speed * t;
+    quad_x = quad_center + quad_half_range * sin(quad_phase);
+    quad_heading = 90.0 * tanh(QUAD_TURN_SHARPNESS * cos(quad_phase));
+
+    /* 트롯(trot) 걸음걸이도 같은 t로부터 직접 계산한다 (같은 이유 -
+       idle() 호출 빈도와 무관하게 항상 같은 속도로 흔들리게 하려고).
+       대각선 다리 쌍이 반대 위상. */
+    double quad_swing = 30.0 * sin(2.0 * t);
+    quad_fl_angle = quad_swing;
+    quad_br_angle = quad_swing;
+    quad_fr_angle = -quad_swing;
+    quad_bl_angle = -quad_swing;
     glutPostRedisplay();
 }
 
@@ -993,37 +1030,43 @@ static void keyboard(unsigned char key, int x, int y) {
     (void)x; (void)y;
     switch (key) {
         case ' ':
-            animate = !animate;
+            main_mode = MAIN_MODE_STOPPED; /* 주인공을 그 자리에 세워둔다 */
+            break;
+        case 'p': case 'P':
+            main_mode = MAIN_MODE_PATH; /* 주인공을 다시 경로 모드로 */
+            limb_animate = 1;
             break;
         case 'q': case 'Q':
-            animate = 0; left_angle += 5.0;
+            limb_animate = 0; left_angle += 5.0;
             break;
         case 'a': case 'A':
-            animate = 0; left_angle -= 5.0;
+            limb_animate = 0; left_angle -= 5.0;
             break;
         case 'e': case 'E':
-            animate = 0; right_angle += 5.0;
+            limb_animate = 0; right_angle += 5.0;
             break;
         case 'd': case 'D':
-            animate = 0; right_angle -= 5.0;
+            limb_animate = 0; right_angle -= 5.0;
             break;
         case 'z': case 'Z':
-            animate = 0; left_leg_angle += 5.0;
+            limb_animate = 0; left_leg_angle += 5.0;
             break;
         case 'x': case 'X':
-            animate = 0; left_leg_angle -= 5.0;
+            limb_animate = 0; left_leg_angle -= 5.0;
             break;
         case 'c': case 'C':
-            animate = 0; right_leg_angle += 5.0;
+            limb_animate = 0; right_leg_angle += 5.0;
             break;
         case 'v': case 'V':
-            animate = 0; right_leg_angle -= 5.0;
+            limb_animate = 0; right_leg_angle -= 5.0;
             break;
         case 'r': case 'R':
             left_angle = 0.0; right_angle = 0.0;
             left_leg_angle = 0.0; right_leg_angle = 0.0;
             body_x = 0.0; body_z = 0.0; body_heading = 0.0;
             t = 0.0;
+            limb_animate = 1;
+            main_mode = MAIN_MODE_PATH;
             break;
         case 'l': case 'L':
             lighting = !lighting;
@@ -1042,22 +1085,25 @@ static void keyboard(unsigned char key, int x, int y) {
 static void special_keys(int key, int x, int y) {
     (void)x; (void)y;
     double heading_r = body_heading * CAM_PI / 180.0;
+    main_mode = MAIN_MODE_MANUAL; /* 방향키를 누르면 경로/정지 모드에서 수동 조작으로 전환 */
+    limb_animate = 1; /* Q/A/E/D/Z/X/C/V로 팔다리를 수동으로 굳혀놨어도,
+                          이동을 시작하면 다시 걷는 스윙 애니메이션이
+                          살아나야 한다 - 안 그러면 다리가 고정된 채로
+                          미끄러지듯 움직여 보인다. */
     switch (key) {
         case GLUT_KEY_UP:
-            animate = 0;
             body_x += 0.1 * sin(heading_r);
             body_z += 0.1 * cos(heading_r);
             break;
         case GLUT_KEY_DOWN:
-            animate = 0;
             body_x -= 0.1 * sin(heading_r);
             body_z -= 0.1 * cos(heading_r);
             break;
         case GLUT_KEY_LEFT:
-            animate = 0; body_heading -= 5.0;
+            body_heading += 5.0;
             break;
         case GLUT_KEY_RIGHT:
-            animate = 0; body_heading += 5.0;
+            body_heading -= 5.0;
             break;
     }
     glutPostRedisplay();
