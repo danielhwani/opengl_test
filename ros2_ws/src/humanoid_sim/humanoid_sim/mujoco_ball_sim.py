@@ -38,6 +38,7 @@ from rclpy.time import Time
 from geometry_msgs.msg import TransformStamped
 from tf2_ros import TransformBroadcaster, Buffer, TransformListener
 from visualization_msgs.msg import Marker, MarkerArray
+from ament_index_python.packages import get_package_share_directory
 
 import mujoco
 
@@ -48,7 +49,18 @@ FALL_RESET_Z = -2.0         # 이 높이보다 낮아지면 다시 떨어뜨림
 RESPAWN_HEIGHT_OFFSET = 2.0  # 고른 몸통 위 이만큼 높은 곳에서 다시 떨어뜨림
 RESPAWN_JITTER = 0.3        # 몸통 중심에서 좌우로 흔드는 정도(m)
 
-DEFAULT_MJCF = os.path.join(os.path.dirname(__file__), "..", "mujoco", "ball_collision.xml")
+def default_mjcf_path():
+    """설치된 패키지의 share 디렉터리에서 MJCF를 찾는다 (colcon install이
+    mujoco/ball_collision.xml을 거기로 복사해둔다 - setup.py의
+    data_files 참고). ament 인덱스를 못 찾는 경우(소스 트리에서 직접
+    스크립트를 실행하는 등)만 __file__ 기준 상대경로로 fallback한다."""
+    try:
+        share_dir = get_package_share_directory("humanoid_sim")
+        return os.path.join(share_dir, "mujoco", "ball_collision.xml")
+    except Exception:
+        return os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "..", "mujoco", "ball_collision.xml")
+        )
 
 
 def ros_quat_to_mujoco(q):
@@ -60,7 +72,7 @@ class MujocoBallSim(Node):
     def __init__(self):
         super().__init__("mujoco_ball_sim")
 
-        self.declare_parameter("mjcf_path", os.path.normpath(DEFAULT_MJCF))
+        self.declare_parameter("mjcf_path", default_mjcf_path())
         mjcf_path = self.get_parameter("mjcf_path").get_parameter_value().string_value
 
         self.model = mujoco.MjModel.from_xml_path(mjcf_path)

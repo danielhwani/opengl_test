@@ -26,6 +26,12 @@ Visualization Manager:
         Value: /quadruped/robot_description
       TF Prefix: ""
       Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: PhysicsMarkers
+      Topic:
+        Value: /physics_markers
+      Value: true
   Global Options:
     Fixed Frame: world
     Frame Rate: 30

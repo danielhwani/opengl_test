@@ -79,6 +79,43 @@ ros2 launch humanoid_sim display.launch.py
 ros2 launch humanoid_sim display.launch.py assets_dir:=D:/다른/경로/computer_graphics
 ```
 
+## 물리 데모: 공을 떨어뜨려 로봇과 충돌시키기
+
+`physics_demo.launch.py`는 `display.launch.py`와 똑같이 두 로봇을
+띄우고, 거기에 더해 `mujoco_ball_sim` 노드로 MuJoCo 물리 엔진을
+돌린다. 공 하나(실제 물리 바디, 자유낙하 + 중력)가 `humanoid_state_
+publisher`/`quadruped_state_publisher`가 발행하는 실시간 TF
+("world"->"Body", "world"->"QuadBody")를 읽어서, 지금 걷고 있는
+humanoid와 순찰 중인 4족 로봇의 몸통(MuJoCo의 "mocap" 바디 - 물리
+영향은 안 받지만 충돌에는 참여)과 실제로 부딪힌다. 공이 바닥 밑으로
+떨어지면 둘 중 한쪽 위에서 다시 떨어뜨려서 반복한다. 결과는
+`/physics_markers`(공 + 반투명 충돌 프록시 2개)와 `world -> ball`
+TF로 RViz2에 보여준다. 자세한 설계는 `mujoco_ball_sim.py`와
+`mujoco/ball_collision.xml`의 docstring/주석 참고.
+
+**중요 - MuJoCo는 rosdep으로 안 받아진다.** `mujoco_ball_sim`은 pip
+패키지 `mujoco`가 필요한데, `colcon build`가 생성하는 각 노드의
+실행 스크립트는 **그 build를 돌릴 때 활성화돼 있던 Python
+인터프리터**를 그대로 가리키게 된다. 그러니 mujoco와 rclpy가 둘 다
+있는 conda 환경(이 프로젝트에서는 `mujoco_ros_38`로 확인됨)을
+활성화한 채로 다시 빌드해야 한다:
+
+```powershell
+conda activate mujoco_ros_38
+cd D:\claude_test\computer_graphics\ros2_ws
+colcon build --packages-select humanoid_sim
+call install\setup.bat
+ros2 launch humanoid_sim physics_demo.launch.py
+```
+
+(이미 다른 conda 환경이나 시스템 Python으로 한 번 빌드해놨다면,
+`mujoco_ball_sim`만 "ModuleNotFoundError: No module named
+'mujoco'"로 죽고 나머지 두 노드는 멀쩩히 돌 수 있다 - 그 경우
+`mujoco_ros_38`을 활성화하고 다시 `colcon build`를 돌리면 된다.)
+
+이 물리 데모는 아직 이 세션에서 실제로 빌드/실행해보지 못했다 -
+문법 검사(`py_compile`)와 MJCF XML 유효성만 확인했다.
+
 ## 원본 OpenGL 데모와 다른 점 (의도적으로 생략한 것)
 
 - 키보드로 주인공을 수동 조작/정지시키는 기능(`MAIN_MODE_MANUAL`/

@@ -617,6 +617,15 @@ TF와 팔다리/다리 관절의 `joint_states`를 발행하고,
 OpenGL 데모와 다른 점(키보드 조작·클론·배경 미포함 등)은 그
 패키지의 `README.md`에 있다.
 
+같은 패키지에 `mujoco_ball_sim` 노드(`physics_demo.launch.py`)도
+추가했다 - MuJoCo 물리 엔진으로 공을 하나 자유낙하시켜서, 위 두 TF를
+실시간으로 읽어 만든 충돌 프록시를 통해 지금 걷고 있는 humanoid/
+순찰 중인 4족 로봇과 실제로 부딪히게 한다. mujoco 패키지가 있는
+conda 환경(`mujoco_ros_38`)을 활성화한 채로 다시 빌드해야 한다는
+점 등 자세한 내용은 `ros2_ws/src/humanoid_sim/README.md` 참고 -
+이 물리 데모는 아직 실제로 빌드/실행해보지는 못했다(문법/XML
+검사만 함).
+
 빌드 중 `setup.py`/`package.xml`에 한글이 들어 있으면 colcon이
 Windows 한국어 로캘의 기본 코드페이지(cp949)로 그 파일을 읽으려다
 UTF-8 한글을 디코딩 못 해 에러가 나는 걸 발견해서, 그 두 파일의

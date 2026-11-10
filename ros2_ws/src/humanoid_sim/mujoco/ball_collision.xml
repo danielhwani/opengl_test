@@ -1,7 +1,7 @@
 <mujoco model="ball_vs_robots">
   <!--
     ball_collision.xml
-    -------------------
+
     공을 떨어뜨려서 humanoid/4족 로봇과 실제로 충돌(접촉)하게 만드는
     간단한 MuJoCo 장면. humanoid_proxy / quad_proxy는 실제 물리
     바디가 아니라 "mocap" 바디다 - mocap 바디는 질량/관성이 적용되지
