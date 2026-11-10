@@ -18,6 +18,13 @@ leg_ros.obj
 quad_body_ros.obj
 quad_head_ros.obj
 quad_leg_ros.obj
+body_ros.mtl
+head_ros.mtl
+arm_ros.mtl
+leg_ros.mtl
+quad_body_ros.mtl
+quad_head_ros.mtl
+quad_leg_ros.mtl
 humanoid.urdf
 humanoid_extra.yaml
 quadruped.urdf

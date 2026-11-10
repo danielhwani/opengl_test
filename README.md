@@ -584,6 +584,16 @@ Windows 한국어 로캘의 기본 코드페이지(cp949)로 그 파일을 읽�
 UTF-8 한글을 디코딩 못 해 에러가 나는 걸 발견해서, 그 두 파일의
 설명문만 영어로 바꿨다 (코드/URDF 쪽 한글 주석은 영향 없음).
 
+실제로 RViz2에 띄워보니 메쉬가 색 없이(민무늬 회/백색으로) 보이는
+문제가 있었다. `*_ros.obj`는 `v`/`vn`/`f`만 있고 재질(material)
+정보가 전혀 없어서 - RViz2(Ogre/assimp 메쉬 로더)가 URDF의
+`<material>` 색을 적용하지 않고 기본색으로 그려버린 것으로 보인다.
+그래서 `gen_humanoid_assets.c`가 `*_ros.obj` 각각에 URDF 재질과
+똑같은 색을 담은 `.mtl`을 만들어서(`bake_material_into_obj()`),
+OBJ 파일 맨 위에 `mtllib .../usemtl mat0`을 끼워 넣는다 - 메쉬
+자체가 색을 들고 있게 해서, RViz2가 URDF 재질을 어떻게 처리하든
+항상 맞는 색으로 보이게 했다.
+
 ## 구현 메모
 
 - `glutSolidTeapot()`은 정점(Vertex)/법선(Normal)만 생성하고 텍스처 좌표는
