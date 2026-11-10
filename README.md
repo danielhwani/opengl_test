@@ -18,6 +18,8 @@
 | `humanoid_loader_test.c` | 그 OBJ + 씬 파일을 런타임에 읽어 렌더링하는 로더 버전 |
 | `humanoid_path.txt` | 몸통이 따라 걷는 웨이포인트 경로 (`x z` 한 줄씩, 폐곡선) |
 | `quadruped_patrol.txt` | 배경의 4족 로봇이 왕복하는 경로 설정 (`z x_min x_max speed`) |
+| `humanoid.urdf` / `quadruped.urdf` | `gen_humanoid_assets.exe`가 같이 만드는 ROS URDF (파일 생성까지만, 아직 ROS 노드는 없음) |
+| `humanoid_extra.yaml` / `quadruped_extra.yaml` | URDF가 담지 못하는 정보(텍스처/옷 색 틴트/애니메이션 파라미터 등)를 담은 보조 파일 |
 
 ## 조작
 
@@ -484,6 +486,88 @@ humanoid 몸을 그리는 함수(`draw_humanoid_body()` /
   거리(`cam_dist` 상한)를 20 → 40, 원근 투영의 far 클리핑 평면을
   50 → 100으로 같이 늘렸다 (안 늘리면 땅 모서리 쪽이 시야 밖으로
   잘려 보일 수 있다).
+
+## URDF / YAML 내보내기 (ROS2)
+
+`gen_humanoid_assets.c`는 OpenGL 데모용 OBJ + 씬 파일 외에, 같은
+모델을 ROS2(URDF)로도 내보낸다 - `humanoid.urdf` / `quadruped.urdf`와
+그 옆의 `humanoid_extra.yaml` / `quadruped_extra.yaml`. **이번 작업
+범위는 파일 생성까지다** - TF/`joint_states`를 발행해서 RViz2에
+실제로 띄우는 ROS2 노드는 아직 없다(환경은 Windows용 ROS2 Humble
+바이너리 설치본으로 확인했음).
+
+### 왜 YAML이 따로 필요한가
+
+URDF는 로봇의 정적인 뼈대(링크-관절 계층)와 겉모습(메쉬+단색)만
+표현한다. 그런데 이 프로젝트의 OpenGL 데모는 그보다 훨씬 많은
+정보를 담고 있다 - 절차적 텍스처, 캐릭터별 옷 색, 시간에 따른
+걷기/트롯 애니메이션, 경로 파일 등. 이런 건 URDF 스키마 자체에
+담을 자리가 없어서, 변환 과정에서 그냥 버리면 "URDF만 보고는 원래
+모습으로 되돌릴 수 없는" 정보 손실이 생긴다. 그래서 URDF 옆에
+같은 이름의 `*_extra.yaml`을 같이 둬서, 사람이 다시 읽고 OpenGL
+쪽 구현에 참고하거나 나중에 더 풍부한 표현(예: Gazebo 플러그인,
+커스텀 RViz 디스플레이)으로 복원할 수 있게 적어뒀다. 구체적으로:
+
+- **텍스처**: URDF `<material><color rgba=.../></material>`는 단색
+  하나만 표현할 수 있다. 실제로는 상의가 가로 줄무늬(절차적으로
+  생성한 64×64 텍스처)인데, URDF에는 그 "대표색"만 넣고, 줄무늬
+  색/주기 같은 진짜 생성 파라미터는 `humanoid_extra.yaml`의
+  `materials` 아래에 적었다.
+- **캐릭터별 옷 색 틴트**: 여러 캐릭터(주인공+클론)를 동시에 그릴 때
+  셔츠/바지에 곱하는 `outfit_tint`는 애초에 "로봇 1개의 구조"만
+  표현하는 URDF의 범위를 벗어난다 (인스턴스가 여러 개라는 개념 자체가
+  URDF엔 없음). `instance_outfit_tints`에 적어뒀다.
+- **애니메이션/경로**: URDF는 "지금 이 모양"만 표현하고 "시간에 따라
+  어떻게 움직이는가"는 담지 않는다. 팔다리 스윙 공식
+  (`35*sin(t)` 등), 걷기 경로 파일(`humanoid_path.txt`)과 보간 방식
+  (Catmull-Rom), 4족 로봇의 트롯/순찰 공식과 설정 파일
+  (`quadruped_patrol.txt`)을 `animation` 아래에 적었다.
+- **코 장식**: 유일하게 "안 잃은" 예외. `draw_head()`에서 OBJ 메쉬가
+  아니라 매 프레임 따로 그리던 작은 구였는데, URDF의 `<visual>`은
+  링크 하나에 여러 개를 둘 수 있고 `<sphere>` 프리미티브도 있어서,
+  Head 링크에 두 번째 `<visual>`(빨간 구)로 손실 없이 그대로
+  옮겼다 - `decorations`에 그 사실만 메모해뒀다.
+- **관절 각도 한계**: 원래 애니메이션은 순수 기구학적 `sin()` 함수라
+  동역학적 한계가 없다. URDF는 `<limit>`(effort/velocity 포함)가
+  문법적으로 필요해서, 실제 스윙 진폭(팔 35도·다리 25도·4족 로봇
+  다리 30도)에 여유를 더한 자리값(팔 45도·다리 35도·4족 로봇
+  45도)을 넣고, YAML에 "이건 진짜 한계가 아니라 placeholder"라고
+  적어뒀다.
+- **장면/배경**: 하늘·땅·그림자·나무는 로봇 자체가 아니라 장면
+  요소라 URDF/YAML 어디에도 넣지 않았다 - `scene_not_included`에
+  "이건 의도적으로 안 넣었다"는 목록만 남겨서, 나중에 world/Gazebo
+  파일로 옮길 때 빠뜨리지 않게 해뒀다.
+
+### Y-up → Z-up 축 변환
+
+OpenGL 데모는 Y가 위인 좌표계를 쓴다 (X=왼쪽, Y=위, Z=앞 - 방향키
+좌/우를 고칠 때 확인한 바로 그 축). ROS는 REP-103 규약에 따라 Z가
+위다 (X=앞, Y=왼쪽, Z=위). 그래서 모든 위치를
+`ros_xyz = (ours_z, ours_x, ours_y)`로 바꿔서 내보낸다. 이건 두
+우수(right-handed) 좌표계 사이의 순수한 회전(행렬식 +1인 치환
+행렬)이라 회전 "방향"(각도의 부호)은 그대로 유지되고 좌표축
+이름만 재배치된다 - 그래서 팔/다리의 ROTX(어깨·엉덩이 pitch) 회전은
+ours의 X축이 ros의 Y축이 되어 URDF에서 `axis="0 1 0"`이 된다
+(ROS의 pitch 축과도 자연스럽게 일치).
+
+메쉬 파일도 같은 변환을 적용한 `*_ros.obj`를 새로 만들어 URDF가
+참조한다 (`body_ros.obj`, `head_ros.obj`, ... 기존 `body.obj` 등은
+Y-up 그대로 남겨 OpenGL 데모에는 영향이 없다). 상자 메쉬는
+`write_box_obj()`에 min/max 인자 순서만 `(z,x,y)`로 바꿔 넣으면
+축이 재배치된 메쉬가 그대로 나오고(상자는 축끼리 쌍을 이루는
+min/max 구간일 뿐이라 재배치로 충분함), 구(머리)는 극축이 코드에
+박혀 있어서 `write_sphere_obj_zup()`을 따로 만들었다.
+
+### 다음 단계로 남겨둔 것
+
+- URDF의 `<mesh filename="...">`는 지금 상대 경로(예:
+  `body_ros.obj`)만 적혀 있다. 실제로 `robot_state_publisher`/
+  RViz2에서 띄우려면 ROS 패키지를 만들어 `package://<pkg>/...`로
+  바꾸거나, 절대경로 `file:///...`로 바꿔야 한다.
+- TF/`joint_states`를 발행하는 ROS2 노드(`rclpy`)는 아직 없다 -
+  이번엔 "URDF/YAML 파일 생성까지"로 범위를 정했고, 다음 단계는
+  이 노드를 작성해서 지금 이 세션에서 바로 쓸 수 있는 Windows용
+  ROS2 Humble + RViz2로 실제 시각화해보는 것.
 
 ## 구현 메모
 
