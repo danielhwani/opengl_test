@@ -22,3 +22,8 @@ humanoid.urdf
 humanoid_extra.yaml
 quadruped.urdf
 quadruped_extra.yaml
+
+# ros2_ws: colcon 빌드 산출물 (src/만 커밋, 재빌드 가능)
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/

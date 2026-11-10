@@ -20,6 +20,7 @@
 | `quadruped_patrol.txt` | 배경의 4족 로봇이 왕복하는 경로 설정 (`z x_min x_max speed`) |
 | `humanoid.urdf` / `quadruped.urdf` | `gen_humanoid_assets.exe`가 같이 만드는 ROS URDF (파일 생성까지만, 아직 ROS 노드는 없음) |
 | `humanoid_extra.yaml` / `quadruped_extra.yaml` | URDF가 담지 못하는 정보(텍스처/옷 색 틴트/애니메이션 파라미터 등)를 담은 보조 파일 |
+| `ros2_ws/` | humanoid.urdf/quadruped.urdf를 RViz2로 가시화하는 ROS2 패키지(`humanoid_sim`) 작업공간 |
 
 ## 조작
 
@@ -565,7 +566,7 @@ min/max 구간일 뿐이라 재배치로 충분함), 구(머리)는 극축이 �
 `robot_state_publisher`/RViz2가 메쉬를 바로 찾을 수 있게 해뒀다.
 
 실제로 TF/`joint_states`를 발행해서 RViz2로 보는 ROS2 노드는
-`D:\claude_test\ros2_ws\src\humanoid_sim`에 따로 만들었다
+`D:\claude_test\computer_graphics\ros2_ws\src\humanoid_sim`에 따로 만들었다
 (`humanoid_state_publisher`/`quadruped_state_publisher`, 둘 다
 Python/rclpy) - `path_sample`(Catmull-Rom)과 걷기/트롯 공식을
 그대로 포팅해서 `world -> base_link` / `world -> quad_base_link`
