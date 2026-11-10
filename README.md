@@ -647,6 +647,15 @@ OBJ 파일 맨 위에 `mtllib .../usemtl mat0`을 끼워 넣는다 - 메쉬
 pants`에만 따로 적혀 있고, 이번에 통합한 "부위 기본 단색"과는
 별개로 남아 있다.)
 
+RViz2에서 확인해보니 머리의 빨간 코가 색이 안 나오는 문제도
+있었다. 처음엔 `humanoid.urdf`의 Head 링크에 코를 `<sphere>`
+프리미티브로 넣었는데(메쉬 없이 URDF 자체 도형), 같은 링크에
+메쉬 visual(머리)과 프리미티브 visual(코)이 같이 있으면 RViz2가
+프리미티브 쪽 `<material>` 색을 무시하고 메쉬 쪽 색으로 덮어버리는
+것으로 보였다. 그래서 코도 다른 부위와 똑같은 방식으로 바꿨다 -
+작은 메쉬(`nose_ros.obj`)를 새로 만들고 거기에 `nose_ros.mtl`을
+구워 넣어서, `<mesh>` visual로 참조하게 했다.
+
 ## 구현 메모
 
 - `glutSolidTeapot()`은 정점(Vertex)/법선(Normal)만 생성하고 텍스처 좌표는

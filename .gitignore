@@ -13,6 +13,7 @@ quad_leg.obj
 humanoid_scene.txt
 body_ros.obj
 head_ros.obj
+nose_ros.obj
 arm_ros.obj
 leg_ros.obj
 quad_body_ros.obj
@@ -20,6 +21,7 @@ quad_head_ros.obj
 quad_leg_ros.obj
 body_ros.mtl
 head_ros.mtl
+nose_ros.mtl
 arm_ros.mtl
 leg_ros.mtl
 quad_body_ros.mtl

@@ -374,7 +374,6 @@ static void write_humanoid_urdf(const char *filename) {
     double body_to_head_z = BODY_H / 2.0;
     double nose_x = HEAD_R * 0.85;
     double nose_z = HEAD_R;
-    double nose_r = HEAD_R * 0.28;
     double arm_z = BODY_H / 2.0;
     double leg_z = -BODY_H / 2.0;
 
@@ -419,11 +418,15 @@ static void write_humanoid_urdf(const char *filename) {
             COLOR_HEAD.r, COLOR_HEAD.g, COLOR_HEAD.b);
     fprintf(f, "    </visual>\n");
     fprintf(f, "    <!-- 코: humanoid_test.c의 draw_head()에서는 OBJ 메쉬가 아니라 매\n");
-    fprintf(f, "         프레임 따로 그리던 작은 빨간 구였다. URDF에서는 프리미티브로\n");
-    fprintf(f, "         손실 없이 그대로 표현한다. -->\n");
+    fprintf(f, "         프레임 따로 그리던 작은 빨간 구였다. 처음엔 URDF <sphere>\n");
+    fprintf(f, "         프리미티브로 넣었는데, 같은 링크(Head)에 메쉬 visual과 프리미티브\n");
+    fprintf(f, "         visual이 같이 있을 때 RViz2가 프리미티브 쪽 <material> 색을\n");
+    fprintf(f, "         무시하는 문제가 있어서(Head 메쉬 색으로 덮임), 다른 부위와\n");
+    fprintf(f, "         똑같이 작은 메쉬(nose_ros.obj) + 거기에 색을 박아 넣은\n");
+    fprintf(f, "         nose_ros.mtl 조합으로 바꿨다. -->\n");
     fprintf(f, "    <visual>\n");
     fprintf(f, "      <origin xyz=\"%.4f 0 %.4f\" rpy=\"0 0 0\"/>\n", nose_x, nose_z);
-    fprintf(f, "      <geometry><sphere radius=\"%.4f\"/></geometry>\n", nose_r);
+    fprintf(f, "      <geometry><mesh filename=\"" ASSET_URI_PREFIX "nose_ros.obj\"/></geometry>\n");
     fprintf(f, "      <material name=\"Nose_material\"><color rgba=\"%.2f %.2f %.2f 1.0\"/></material>\n",
             COLOR_NOSE.r, COLOR_NOSE.g, COLOR_NOSE.b);
     fprintf(f, "    </visual>\n");
@@ -629,12 +632,16 @@ static void write_humanoid_extra_yaml(const char *filename) {
 
     fprintf(f, "decorations:\n");
     fprintf(f, "  # draw_head()에서 OBJ 메쉬가 아니라 매 프레임 따로 그리던 장식.\n");
-    fprintf(f, "  # humanoid.urdf의 Head 링크에 sphere 프리미티브 visual로 이미\n");
-    fprintf(f, "  # 손실 없이 옮겨뒀다 (참고용 메모).\n");
+    fprintf(f, "  # humanoid.urdf의 Head 링크에 손실 없이 옮겨뒀다 (참고용 메모).\n");
+    fprintf(f, "  # 처음엔 <sphere> 프리미티브로 넣었는데, 같은 링크(Head)에 메쉬\n");
+    fprintf(f, "  # visual과 프리미티브 visual이 같이 있으면 RViz2가 프리미티브의\n");
+    fprintf(f, "  # <material> 색을 무시하는 문제가 있어서(Head 메쉬 색으로 덮임),\n");
+    fprintf(f, "  # 다른 부위와 똑같이 작은 메쉬(nose_ros.obj + nose_ros.mtl)로\n");
+    fprintf(f, "  # 바꿨다.\n");
     fprintf(f, "  nose:\n");
     fprintf(f, "    represented_in_urdf: true\n");
     fprintf(f, "    link: Head\n");
-    fprintf(f, "    shape: sphere\n\n");
+    fprintf(f, "    shape: mesh (nose_ros.obj, small sphere)\n\n");
 
     fprintf(f, "animation:\n");
     fprintf(f, "  # URDF는 정적인 뼈대/외형만 담고, 시간에 따른 움직임(걷기 애니메이션)\n");
@@ -783,6 +790,11 @@ int main(void) {
     write_box_obj("body_ros.obj", -BODY_D / 2.0, BODY_D / 2.0,
                    -BODY_W / 2.0, BODY_W / 2.0, -BODY_H / 2.0, BODY_H / 2.0);
     write_sphere_obj_zup("head_ros.obj", HEAD_R, HEAD_R, 24, 16);
+    /* 코: humanoid.urdf에서 <sphere> 프리미티브로 뒀더니 같은 링크의
+       메쉬 visual에 색이 덮여버려서(아래 write_humanoid_urdf() 주석
+       참고), 다른 부위와 똑같이 작은 메쉬로 만든다. center_z=0 -
+       위치는 URDF의 <origin>이 맡고, 이 메쉬는 반지름만 책임진다. */
+    write_sphere_obj_zup("nose_ros.obj", HEAD_R * 0.28, 0.0, 12, 12);
     write_box_obj("arm_ros.obj", -ARM_D / 2.0, ARM_D / 2.0,
                    -ARM_W / 2.0, ARM_W / 2.0, -ARM_LEN, 0.0);
     write_box_obj("leg_ros.obj", -LEG_D / 2.0, LEG_D / 2.0,
@@ -799,6 +811,7 @@ int main(void) {
        경우가 있어서, 메쉬 자체에도 색을 들려보낸다. */
     bake_material_into_obj("body_ros.obj", "body_ros.mtl", COLOR_BODY.r, COLOR_BODY.g, COLOR_BODY.b);
     bake_material_into_obj("head_ros.obj", "head_ros.mtl", COLOR_HEAD.r, COLOR_HEAD.g, COLOR_HEAD.b);
+    bake_material_into_obj("nose_ros.obj", "nose_ros.mtl", COLOR_NOSE.r, COLOR_NOSE.g, COLOR_NOSE.b);
     bake_material_into_obj("arm_ros.obj", "arm_ros.mtl", COLOR_ARM.r, COLOR_ARM.g, COLOR_ARM.b);
     bake_material_into_obj("leg_ros.obj", "leg_ros.mtl", COLOR_LEG.r, COLOR_LEG.g, COLOR_LEG.b);
     bake_material_into_obj("quad_body_ros.obj", "quad_body_ros.mtl",
