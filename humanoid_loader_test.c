@@ -550,8 +550,13 @@ static void draw_sky(void) {
 }
 
 /* 땅: humanoid_test.c와 동일, 흙색 큰 사각형. */
-#define GROUND_HALF 20.0
+#define GROUND_HALF 30.0
 #define GROUND_Y -0.01
+
+/* 수동 조작(방향키)으로 땅 바깥까지 걸어나가 화면 밖으로 사라지지
+   않도록, 주인공의 이동 범위를 땅 경계보다 약간 안쪽으로 고정
+   (clamp)한다. special_keys()에서 사용. */
+#define PLAY_HALF (GROUND_HALF - 1.0)
 
 static void draw_ground(void) {
     glColor3f(0.42f, 0.30f, 0.18f);
@@ -767,7 +772,7 @@ static void mouse_wheel(int wheel, int direction, int x, int y) {
     (void)wheel; (void)x; (void)y;
     cam_dist -= direction * 0.4;
     if (cam_dist < 1.5) cam_dist = 1.5;
-    if (cam_dist > 20.0) cam_dist = 20.0;
+    if (cam_dist > 40.0) cam_dist = 40.0;
     glutPostRedisplay();
 }
 
@@ -1019,6 +1024,13 @@ static void special_keys(int key, int x, int y) {
             body_heading -= 5.0;
             break;
     }
+
+    /* 땅 경계 밖으로 나가 화면에서 사라지지 않게 고정(clamp)한다. */
+    if (body_x > PLAY_HALF) body_x = PLAY_HALF;
+    if (body_x < -PLAY_HALF) body_x = -PLAY_HALF;
+    if (body_z > PLAY_HALF) body_z = PLAY_HALF;
+    if (body_z < -PLAY_HALF) body_z = -PLAY_HALF;
+
     glutPostRedisplay();
 }
 
@@ -1027,7 +1039,7 @@ static void reshape(int w, int h) {
     glViewport(0, 0, w, h);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    gluPerspective(45.0, (double)w / (double)h, 0.1, 50.0);
+    gluPerspective(45.0, (double)w / (double)h, 0.1, 100.0);
     glMatrixMode(GL_MODELVIEW);
 }
 
