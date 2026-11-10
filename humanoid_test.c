@@ -411,12 +411,20 @@ static int tex_on(void) {
     return texturing && !rendering_shadow;
 }
 
+/* 여러 캐릭터를 동시에 그릴 때 옷(셔츠/바지) 색을 서로 다르게 보이게
+   하는 틴트(tint). GL_MODULATE라 최종 색 = 텍스처 색 * vertex 색이므로,
+   흰색(1,1,1) 대신 이 값을 곱하면 같은 셔츠/바지 텍스처가 물든 것처럼
+   색만 바뀐다. draw_all_humanoids()가 캐릭터를 바꿔 그리기 전에 이
+   값을 설정해둔다. 얼굴(피부)은 전부 흰색 그대로 둬서 옷만 구별되게
+   한다. */
+static float outfit_tint[3] = {1.0f, 1.0f, 1.0f};
+
 /* 몸통: 현재 원점을 중심으로 한 상자. 상의(셔츠) 텍스처를 입힌다. */
 static void draw_body(void) {
     glPushMatrix();
     if (tex_on()) {
         glBindTexture(GL_TEXTURE_2D, shirt_texture_id);
-        if (!rendering_shadow) glColor3f(1.0f, 1.0f, 1.0f);
+        if (!rendering_shadow) glColor3f(outfit_tint[0], outfit_tint[1], outfit_tint[2]);
     } else if (!rendering_shadow) {
         glColor3f(0.55f, 0.55f, 0.65f);
     }
@@ -460,7 +468,7 @@ static void draw_arm(double side_x) {
     glPushMatrix();
     if (tex_on()) {
         glBindTexture(GL_TEXTURE_2D, shirt_texture_id);
-        if (!rendering_shadow) glColor3f(1.0f, 1.0f, 1.0f);
+        if (!rendering_shadow) glColor3f(outfit_tint[0], outfit_tint[1], outfit_tint[2]);
     } else if (!rendering_shadow) {
         glColor3f(0.45f, 0.45f, 0.55f);
     }
@@ -477,7 +485,7 @@ static void draw_leg(double side_x) {
     glPushMatrix();
     if (tex_on()) {
         glBindTexture(GL_TEXTURE_2D, pants_texture_id);
-        if (!rendering_shadow) glColor3f(1.0f, 1.0f, 1.0f);
+        if (!rendering_shadow) glColor3f(outfit_tint[0], outfit_tint[1], outfit_tint[2]);
     } else if (!rendering_shadow) {
         glColor3f(0.35f, 0.35f, 0.45f);
     }
@@ -490,13 +498,17 @@ static void draw_leg(double side_x) {
 /* 트리 전체(ROOT 변환 + body/head/arms/legs)를 그린다. display()에서
    분리해둔 이유는 그림자 렌더링에도 똑같이 재사용하기 위해서다 -
    그림자는 이 함수를 "광원 기준 y=0 투영 행렬"을 미리 곱해둔 상태로
-   한 번 더 호출해서 만든다(아래 apply_shadow_matrix). */
-static void draw_humanoid_body(void) {
+   한 번 더 호출해서 만든다(아래 apply_shadow_matrix).
+   ROOT의 월드 위치/방향을 인자로 받는다 - 여러 캐릭터를 같은 경로
+   위 다른 지점에 동시에 그리기 위해서다 (팔다리 스윙은 전부 같은
+   left_angle/right_angle 등 전역 상태를 공유해서 같은 박자로 움직
+   인다). */
+static void draw_humanoid_body(double x, double z, double heading) {
     /* ROOT 자체가 "엉덩이" 높이라서, y를 0으로 두면 다리(LEG_LEN)가
        그대로 땅(y=0) 밑으로 파고든다. 발이 땅에 닿도록 ROOT를
        LEG_LEN만큼 들어올린다. */
-    glTranslated(body_x, LEG_LEN, body_z);   /* 몸통의 월드 위치 (ROOT) */
-    glRotated(body_heading, 0, 1, 0);    /* 몸통의 방향 (ROOT) */
+    glTranslated(x, LEG_LEN, z);   /* 몸통의 월드 위치 (ROOT) */
+    glRotated(heading, 0, 1, 0);    /* 몸통의 방향 (ROOT) */
 
     glTranslated(0.0, BODY_H / 2.0, 0.0);      /* body: T1 */
     draw_body();
@@ -529,6 +541,52 @@ static void draw_humanoid_body(void) {
             draw_leg(HIP_X);
         glPopMatrix();                            /* -> T1*T3 복귀 (R4 제거) */
     glPopMatrix();                                /* -> T1 복귀 (legs 변환 제거) */
+}
+
+/* ---- 여러 캐릭터 동시 렌더링 ----
+   주인공(body_x/body_z/body_heading, 방향키로 수동 조작 가능)과 똑같은
+   humanoid_path.txt 경로를 걷는 "클론" 캐릭터를 몇 명 더 세워둔다.
+   클론의 위치는 매 틱 독립적으로 계산하지 않고, path_sample()에 주는
+   이동 거리(s)에 서로 다른 고정 오프셋을 더해서 구한다 - s가 경로
+   "호의 길이"이므로, 오프셋을 path_total_len/인원수로 等分하면 경로
+   모양과 무관하게 항상 고리 위에 고르게 퍼진 채로 같은 속도로
+   따라 걷는다. 팔다리 스윙(left_angle 등)은 전부 공유 전역 상태라
+   모든 캐릭터가 같은 박자로 움직인다 - 각자 다른 위상으로 걷게
+   하려면 그 각도들도 인스턴스별로 따로 둬야 하지만, 지금은 "같은
+   동작으로 경로를 도는 여러 캐릭터"만 보여주는 게 목적이라 단순하게
+   위치만 instance별로 다르게 둔다. */
+#define HUMANOID_CLONE_COUNT 2
+static double clone_x[HUMANOID_CLONE_COUNT];
+static double clone_z[HUMANOID_CLONE_COUNT];
+static double clone_heading[HUMANOID_CLONE_COUNT];
+
+/* 캐릭터별 옷 색 틴트 - [0]은 주인공, [1..]은 클론들. outfit_tint에
+   대입해두면 draw_body/draw_arm/draw_leg가 셔츠/바지 텍스처에 이 색을
+   곱해서 그린다 (위 outfit_tint 선언부 주석 참고). */
+static const float outfit_tints[HUMANOID_CLONE_COUNT + 1][3] = {
+    {1.00f, 1.00f, 1.00f}, /* 주인공: 원래 셔츠/바지 색 그대로 */
+    {1.00f, 0.55f, 0.55f}, /* 클론 1: 붉은 톤 */
+    {0.55f, 0.80f, 1.00f}, /* 클론 2: 푸른 톤 */
+};
+
+/* draw_trees()처럼 각 캐릭터의 ROOT 변환을 내부에서 push/pop으로
+   감싸서, 호출하는 쪽에서 따로 감싸지 않아도 변환이 새지 않는다. */
+static void draw_all_humanoids(void) {
+    outfit_tint[0] = outfit_tints[0][0];
+    outfit_tint[1] = outfit_tints[0][1];
+    outfit_tint[2] = outfit_tints[0][2];
+    glPushMatrix();
+        draw_humanoid_body(body_x, body_z, body_heading);
+    glPopMatrix();
+
+    for (int i = 0; i < HUMANOID_CLONE_COUNT; i++) {
+        outfit_tint[0] = outfit_tints[i + 1][0];
+        outfit_tint[1] = outfit_tints[i + 1][1];
+        outfit_tint[2] = outfit_tints[i + 1][2];
+        glPushMatrix();
+            draw_humanoid_body(clone_x[i], clone_z[i], clone_heading[i]);
+        glPopMatrix();
+    }
 }
 
 /* ---- 그림자: 평행광(directional light) 가정의 전단(shear) 투영 ----
@@ -837,15 +895,12 @@ static void display(void) {
     glColor4f(0.0f, 0.0f, 0.0f, 0.35f);
     glPushMatrix();
         apply_shadow_matrix(LIGHT_X, LIGHT_Y, LIGHT_Z);
-        /* draw_humanoid_body()는 자기 몫의 glTranslated/glRotated(ROOT)를
-           push/pop 없이 바로 현재 행렬에 곱한다 - display()의 실제 몸
-           패스에서는 그걸 glPushMatrix로 감싸서 격리해주는데, 여기서도
-           똑같이 감싸야 한다. 안 그러면 몸의 ROOT 변환이 그대로 남아있는
-           상태로 draw_trees()가 불려서, 나무까지 몸을 따라 돌고 움직이는
-           것처럼 보인다(그림자가 캐릭터를 따라 빙글빙글 도는 버그). */
-        glPushMatrix();
-            draw_humanoid_body();
-        glPopMatrix();
+        /* draw_all_humanoids()/draw_trees()/draw_quadruped() 모두 각자
+           자기 몫의 ROOT 변환을 내부에서 push/pop으로 감싸므로, 여기서
+           따로 감싸지 않아도 한 캐릭터의 변환이 다음에 그려지는 다른
+           소품으로 새지 않는다 (예전에 이걸 안 지켜서 나무 그림자가
+           캐릭터를 따라 빙글빙글 도는 버그가 있었다). */
+        draw_all_humanoids();
         draw_trees();
         draw_quadruped();
     glPopMatrix();
@@ -863,9 +918,7 @@ static void display(void) {
         glDisable(GL_TEXTURE_2D);
     }
 
-    glPushMatrix();
-        draw_humanoid_body();
-    glPopMatrix();
+    draw_all_humanoids();
 
     /* 나무/4족 로봇: 땅과 마찬가지로 체커 텍스처와 분리해서, 항상
        각자의 glColor3f만으로 그린다. */
@@ -893,6 +946,15 @@ static void idle(void) {
            고정값을 누적시키지 않고 t로부터 직접 계산하므로(path_sample),
            idle() 호출 빈도(프레임 속도)와 무관하게 항상 같은 속도로 걷는다. */
         path_sample(0.6 * t, &body_x, &body_z, &body_heading);
+
+        /* 클론들은 같은 경로를 같은 속도로 걷되, 호의 길이(s) 기준으로
+           고르게 떨어진 지점에서 걷는다 - path_total_len을
+           (클론 수+1)로 나눈 간격만큼씩 밀어주면 경로 모양과 무관하게
+           항상 고리 위에 균등하게 퍼진다. */
+        for (int i = 0; i < HUMANOID_CLONE_COUNT; i++) {
+            double offset = path_total_len * (double)(i + 1) / (double)(HUMANOID_CLONE_COUNT + 1);
+            path_sample(0.6 * t + offset, &clone_x[i], &clone_z[i], &clone_heading[i]);
+        }
 
         /* 4족 로봇은 x축 방향으로만 왕복(patrol)한다 - z는
            quadruped_patrol.txt에서 읽은 quad_patrol_z로 고정이라

@@ -353,6 +353,15 @@ static GLuint skin_texture_id = 0;
 static GLuint shirt_texture_id = 0;
 static GLuint pants_texture_id = 0;
 
+/* 여러 캐릭터를 동시에 그릴 때 옷(셔츠/바지) 색을 서로 다르게 보이게
+   하는 틴트(tint). humanoid_test.c와 동일한 원리 - GL_MODULATE라
+   최종 색 = 텍스처 색 * vertex 색이므로, 흰색 대신 이 값을 곱하면
+   같은 셔츠/바지 텍스처가 물든 것처럼 색만 바뀐다. 피부(스킨)
+   텍스처는 그대로 흰색을 써서 얼굴은 모든 캐릭터가 같게 둔다.
+   draw_all_humanoids()가 캐릭터를 바꿔 그리기 전에 이 값을
+   설정해둔다. */
+static float outfit_tint[3] = {1.0f, 1.0f, 1.0f};
+
 /* 피부: 살색 단색. */
 static void create_skin_texture(void) {
     static unsigned char pix[BODY_TEX_SIZE][BODY_TEX_SIZE][3];
@@ -440,9 +449,17 @@ static void render_children(const char *parent_name) {
             /* 부위별 텍스처(피부/상의/하의)를 입히는 동안은 glColor를
                흰색으로 둬야 한다 - GL_MODULATE라 최종 색 = 텍스처 색 *
                vertex 색인데, 씬 파일에 적힌 칙칙한 색을 그대로 두면
-               텍스처 색 위에 덧씌워져 탁해진다. */
+               텍스처 색 위에 덧씌워져 탁해진다. 다만 셔츠/바지(스킨이
+               아닌 텍스처)는 흰색 대신 outfit_tint를 곱해서, 여러
+               캐릭터를 같이 그릴 때 옷 색으로 구별할 수 있게 한다. */
             glBindTexture(GL_TEXTURE_2D, part_tex);
-            if (!rendering_shadow) glColor3f(1.0f, 1.0f, 1.0f);
+            if (!rendering_shadow) {
+                if (part_tex == skin_texture_id) {
+                    glColor3f(1.0f, 1.0f, 1.0f);
+                } else {
+                    glColor3f(outfit_tint[0], outfit_tint[1], outfit_tint[2]);
+                }
+            }
         } else if (!rendering_shadow) {
             glColor3f(p->color[0], p->color[1], p->color[2]);
         }
@@ -752,11 +769,47 @@ static void draw_axes(double length) {
 
 /* ROOT 변환 + 전체 트리를 그린다. 그림자 패스에서도 재사용하기 위해
    분리해뒀다. ROOT는 "엉덩이" 높이라 LEG_LEN만큼 들어올려야 발이
-   땅(y=0)에 닿는다 (humanoid_test.c의 draw_humanoid_body()와 동일). */
-static void draw_humanoid_root(void) {
-    glTranslated(body_x, LEG_LEN, body_z); /* 몸통의 월드 위치 (ROOT) */
-    glRotated(body_heading, 0, 1, 0);      /* 몸통의 방향 (ROOT) */
+   땅(y=0)에 닿는다 (humanoid_test.c의 draw_humanoid_body()와 동일).
+   ROOT의 월드 위치/방향을 인자로 받는다 - 여러 캐릭터를 같은 경로
+   위 다른 지점에 동시에 그리기 위해서다. */
+static void draw_humanoid_root(double x, double z, double heading) {
+    glTranslated(x, LEG_LEN, z); /* 몸통의 월드 위치 (ROOT) */
+    glRotated(heading, 0, 1, 0); /* 몸통의 방향 (ROOT) */
     render_children("ROOT");
+}
+
+/* ---- 여러 캐릭터 동시 렌더링: humanoid_test.c와 동일. 주인공과 같은
+   경로를 걷는 클론들을 경로 호 길이 기준으로 고르게 떨어뜨려 세운다.
+   캐릭터별 옷 색 틴트도 같은 배열([0]=주인공, [1..]=클론)을 쓴다. ---- */
+#define HUMANOID_CLONE_COUNT 2
+static double clone_x[HUMANOID_CLONE_COUNT];
+static double clone_z[HUMANOID_CLONE_COUNT];
+static double clone_heading[HUMANOID_CLONE_COUNT];
+
+static const float outfit_tints[HUMANOID_CLONE_COUNT + 1][3] = {
+    {1.00f, 1.00f, 1.00f}, /* 주인공: 원래 셔츠/바지 색 그대로 */
+    {1.00f, 0.55f, 0.55f}, /* 클론 1: 붉은 톤 */
+    {0.55f, 0.80f, 1.00f}, /* 클론 2: 푸른 톤 */
+};
+
+/* draw_trees()처럼 각 캐릭터의 ROOT 변환을 내부에서 push/pop으로
+   감싸서, 호출하는 쪽에서 따로 감싸지 않아도 변환이 새지 않는다. */
+static void draw_all_humanoids(void) {
+    outfit_tint[0] = outfit_tints[0][0];
+    outfit_tint[1] = outfit_tints[0][1];
+    outfit_tint[2] = outfit_tints[0][2];
+    glPushMatrix();
+        draw_humanoid_root(body_x, body_z, body_heading);
+    glPopMatrix();
+
+    for (int i = 0; i < HUMANOID_CLONE_COUNT; i++) {
+        outfit_tint[0] = outfit_tints[i + 1][0];
+        outfit_tint[1] = outfit_tints[i + 1][1];
+        outfit_tint[2] = outfit_tints[i + 1][2];
+        glPushMatrix();
+            draw_humanoid_root(clone_x[i], clone_z[i], clone_heading[i]);
+        glPopMatrix();
+    }
 }
 
 static void display(void) {
@@ -775,10 +828,10 @@ static void display(void) {
 
     /* 그림자 패스: humanoid_test.c와 동일 - 조명/텍스처를 끄고 반투명
        검은색으로, 전단 변환을 곱한 채로 몸과 나무를 한 번 더 그린다.
-       draw_humanoid_root()는 자기 몫의 ROOT 변환을 push/pop 없이 바로
-       곱하므로, 그 변환이 나무까지 새어나가지 않도록 별도로
-       glPushMatrix로 감싼다 (안 그러면 나무 그림자가 캐릭터를 따라
-       움직이고 도는 버그가 생긴다). */
+       draw_all_humanoids()/draw_trees()/draw_quadruped() 모두 각자
+       자기 몫의 ROOT 변환을 내부에서 push/pop으로 감싸므로, 여기서
+       따로 감싸지 않아도 한 캐릭터의 변환이 다음 소품으로 새지
+       않는다. */
     rendering_shadow = 1;
     glDisable(GL_LIGHTING);
     glDisable(GL_TEXTURE_2D);
@@ -788,9 +841,7 @@ static void display(void) {
     glColor4f(0.0f, 0.0f, 0.0f, 0.35f);
     glPushMatrix();
         apply_shadow_matrix(LIGHT_X, LIGHT_Y, LIGHT_Z);
-        glPushMatrix();
-            draw_humanoid_root();
-        glPopMatrix();
+        draw_all_humanoids();
         draw_trees();
         draw_quadruped();
     glPopMatrix();
@@ -808,9 +859,7 @@ static void display(void) {
         glDisable(GL_TEXTURE_2D);
     }
 
-    glPushMatrix();
-        draw_humanoid_root();
-    glPopMatrix();
+    draw_all_humanoids();
 
     /* 나무/4족 로봇: 땅과 마찬가지로 체커 텍스처와 분리해서, 항상
        각자의 glColor3f만으로 그린다. */
@@ -836,6 +885,13 @@ static void idle(void) {
            고정값을 누적시키지 않고 t로부터 직접 계산하므로(path_sample),
            idle() 호출 빈도(프레임 속도)와 무관하게 항상 같은 속도로 걷는다. */
         path_sample(0.6 * t, &body_x, &body_z, &body_heading);
+
+        /* 클론들은 같은 경로를 같은 속도로 걷되, 호의 길이(s) 기준으로
+           고르게 떨어진 지점에서 걷는다 (humanoid_test.c와 동일 원리). */
+        for (int i = 0; i < HUMANOID_CLONE_COUNT; i++) {
+            double offset = path_total_len * (double)(i + 1) / (double)(HUMANOID_CLONE_COUNT + 1);
+            path_sample(0.6 * t + offset, &clone_x[i], &clone_z[i], &clone_heading[i]);
+        }
 
         /* 4족 로봇은 x축 방향으로만 왕복(patrol)한다 - humanoid_test.c와
            동일한 이유/계산. 방향 전환은 tanh로 완만하게 이어서 왕복 양
