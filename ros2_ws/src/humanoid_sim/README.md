@@ -79,45 +79,80 @@ ros2 launch humanoid_sim display.launch.py
 ros2 launch humanoid_sim display.launch.py assets_dir:=D:/다른/경로/computer_graphics
 ```
 
-## 물리 데모: 공을 떨어뜨려 로봇과 충돌시키기
+## 물리 데모: 공을 떨어뜨려 로봇과 충돌시키기 (로봇도 반응함)
 
 `physics_demo.launch.py`는 `display.launch.py`와 똑같이 두 로봇을
 띄우고, 거기에 더해 `mujoco_ball_sim` 노드로 MuJoCo 물리 엔진을
-돌린다. 공 하나(실제 물리 바디, 자유낙하 + 중력)가 `humanoid_state_
-publisher`/`quadruped_state_publisher`가 발행하는 실시간 TF
-("world"->"Body", "world"->"QuadBody")를 읽어서, 지금 걷고 있는
-humanoid와 순찰 중인 4족 로봇의 몸통(MuJoCo의 "mocap" 바디 - 물리
-영향은 안 받지만 충돌에는 참여)과 실제로 부딪힌다. **3초(`RESPAWN_
-INTERVAL_SEC`)마다 둘 중 한쪽 바로 위에서 공을 다시 떨어뜨린다** -
-처음엔 "바닥 아래로 떨어졌을 때만" 다시 떨어뜨리게 해놨는데, 빈
-바닥에 착지해서 가만히 멈추면 그 조건을 다시는 만족 못 해 공이
-영원히 멈춰버리는 버그가 있었다. 결과는 `/physics_markers`(공 +
-반투명 충돌 프록시 2개)와 `world -> ball` TF로 RViz2에 보여준다.
-자세한 설계는 `mujoco_ball_sim.py`와 `mujoco/ball_collision.xml`의
-docstring/주석 참고.
+돌린다. 공 하나(실제 물리 바디, 자유낙하 + 중력)가 humanoid/4족
+로봇의 몸통 충돌 프록시와 실제로 부딪힌다 - **그리고 맞으면 로봇도
+반응한다.**
+
+- 처음엔 프록시를 "mocap" 바디(물리 영향은 안 받고 자세만 외부
+  TF로 그대로 주입받는)로 만들어서, 공은 튕기는데 로봇은 전혀
+  반응이 없었다.
+- 그래서 프록시를 질량이 있는 진짜 물리 바디로 바꾸고, 대신 매 틱
+  "지금 걷고 있는/순찰 중인 목표 자세"(`humanoid_state_publisher`/
+  `quadruped_state_publisher`가 발행하는 `"world"->"base_link_target"`/
+  `"world"->"quad_base_link_target"` TF)를 향해 가상의 스프링-댐퍼
+  힘/토크를 걸었다. 평소엔 그 목표를 그대로 따라가며 걷지만, 공에
+  맞으면 스프링이 늘어나(목표에서 벗어나) 순간적으로 흔들리다가
+  다시 걷기 자세로 돌아온다.
+- `mujoco_ball_sim`이 그 물리 시뮬레이션 결과(흔들림 포함)를 실제
+  `"world"->"base_link"`/`"world"->"quad_base_link"` TF로 발행해서,
+  `robot_state_publisher`가 그걸로 전체 로봇 메쉬의 TF를 계산한다 -
+  그래서 RViz2에 보이는 로봇 자체가 흔들린다. 두 state publisher는
+  `publish_base_link` 파라미터를 `False`로 받아서(이 launch 파일이
+  그렇게 띄움) 그 프레임을 직접 발행하지 않는다 - 안 그러면 두
+  발행자가 같은 TF 프레임을 두고 충돌한다.
+
+**3초(`RESPAWN_INTERVAL_SEC`)마다 둘 중 한쪽 바로 위에서 공을 다시
+떨어뜨린다** - 처음엔 "바닥 아래로 떨어졌을 때만" 다시 떨어뜨리게
+해놨는데, 빈 바닥에 착지해서 가만히 멈추면 그 조건을 다시는 만족
+못 해 공이 영원히 멈춰버리는 버그가 있었다.
+
+결과는 `/physics_markers`(공 + 반투명 충돌 프록시 2개 - 로봇이
+흔들리는 동안 이 프록시도 같이 흔들린다)와 `world -> ball` /
+`world -> base_link` / `world -> quad_base_link` TF로 RViz2에
+보여준다. 자세한 설계는 `mujoco_ball_sim.py`와
+`mujoco/ball_collision.xml`의 docstring/주석 참고.
+
+**스프링 상수는 안 튜닝했다.** `SPRING_KP_POS`(위치 스프링 세기)는
+질량으로 임계댐핑을 계산해서 "진동 없이 가장 빨리 돌아오는" 값을
+자동으로 맞추지만, 회전 스프링(`SPRING_KP_ROT`/`SPRING_KD_ROT`)과
+공/로봇 질량, "얼마나 세게 흔들렸으면 좋겠는지" 자체는 실제로 보면서
+조절해야 하는 값이다 - 이 세션에서는 MuJoCo를 직접 돌려볼 수 없어서
+숫자만 합리적으로 골랐고 튜닝은 못 했다.
 
 **중요 - MuJoCo는 rosdep으로 안 받아진다.** `mujoco_ball_sim`은 pip
-패키지 `mujoco`가 필요한데, `colcon build`가 생성하는 각 노드의
-실행 스크립트는 **그 build를 돌릴 때 활성화돼 있던 Python
-인터프리터**를 그대로 가리키게 된다. 그러니 mujoco와 rclpy가 둘 다
-있는 conda 환경(이 프로젝트에서는 `mujoco_ros_38`로 확인됨)을
-활성화한 채로 다시 빌드해야 한다:
+패키지 `mujoco`가 필요하다. 처음엔 conda 환경(`mujoco_ros_38`)에
+설치하면 될 줄 알았는데, 이 ROS2 Humble(Windows) 설치는 colcon/ros2
+전체가 **항상 `C:\Python38`을 쓰도록 고정**돼 있었다 -
+`conda activate`를 해도 `colcon` 명령 자체가 그 conda 환경에
+설치돼 있지 않으면(`colcon-common-extensions`를 거기 따로 깐 적이
+없으면) PATH에서 결국 `C:\Python38`의 `colcon.exe`가 호출되기
+때문이다. 그래서 `mujoco`를 그 Python에 직접 설치해야 했다:
 
 ```powershell
-conda activate mujoco_ros_38
+C:\Python38\python.exe -m pip install mujoco
+```
+
+(PyPI 인증서 문제 - `NO_CERTIFICATE_OR_CRL_FOUND` 류 SSL 에러가
+나면, `--trusted-host pypi.org --trusted-host files.pythonhosted.org`
+를 덧붙이면 우회된다. 이 환경에서 실제로 이 방법으로 설치됐다.)
+
+```powershell
 cd D:\claude_test\computer_graphics\ros2_ws
 colcon build --packages-select humanoid_sim
 call install\setup.bat
 ros2 launch humanoid_sim physics_demo.launch.py
 ```
 
-(이미 다른 conda 환경이나 시스템 Python으로 한 번 빌드해놨다면,
-`mujoco_ball_sim`만 "ModuleNotFoundError: No module named
-'mujoco'"로 죽고 나머지 두 노드는 멀쩩히 돌 수 있다 - 그 경우
-`mujoco_ros_38`을 활성화하고 다시 `colcon build`를 돌리면 된다.)
-
-이 물리 데모는 아직 이 세션에서 실제로 빌드/실행해보지 못했다 -
-문법 검사(`py_compile`)와 MJCF XML 유효성만 확인했다.
+**검증 상태**: 공이 로봇과 충돌하고(이전 버전, mocap 방식) RViz2에
+정상 표시되는 것까지는 실제로 빌드/실행해서 확인했다. 로봇이
+질량을 갖고 스프링으로 반응하게 만든 이번 버전(이 섹션에서 설명한
+전체)은 아직 이 세션에서 실제로 돌려보지 못했다 - 문법 검사
+(`py_compile`), MJCF XML 유효성, 쿼터니언 곱/켤레 함수의 수치
+검증만 했다.
 
 ## 원본 OpenGL 데모와 다른 점 (의도적으로 생략한 것)
 

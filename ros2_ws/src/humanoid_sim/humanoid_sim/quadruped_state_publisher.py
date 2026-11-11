@@ -11,9 +11,13 @@ x축 왕복(patrol) + 트롯(trot) 걸음걸이를 ROS2 joint_states + TF로
   읽어서 TF를 계산해준다.
 - x축 왕복 위치 + tanh로 완만하게 도는 방향 전환은 URDF가 표현하지
   못하는 "세계 속 로봇의 위치"라서, 이 노드가 "world" ->
-  "quad_base_link" TF를 직접 발행한다 (quadruped.urdf의 루트가
+  "quad_base_link_target" TF를 발행한다 (quadruped.urdf의 루트가
   humanoid.urdf의 "base_link"와 안 겹치게 "quad_base_link"인 이유는
-  quadruped.urdf 안의 주석 참고).
+  quadruped.urdf 안의 주석 참고). publish_base_link 파라미터(기본
+  True)가 켜져 있으면 같은 값을 "world" -> "quad_base_link"로도
+  발행한다 - mujoco_ball_sim이 그 프레임을 물리 시뮬레이션 결과로
+  대신 발행할 때는(physics_demo.launch.py) 이 파라미터를 False로
+  꺼서 두 발행자가 충돌하지 않게 한다.
 
 좌표 변환은 humanoid_state_publisher.py와 동일:
 ros_xyz = (ours_z, ours_x, ours_y).
@@ -63,6 +67,9 @@ class QuadrupedStatePublisher(Node):
         patrol_file = self.get_parameter("patrol_file").get_parameter_value().string_value
         self.patrol_z, self.x_min, self.x_max, self.speed = load_patrol(patrol_file)
 
+        self.declare_parameter("publish_base_link", True)
+        self.publish_base_link = self.get_parameter("publish_base_link").value
+
         self.t = 0.0
         self.joint_pub = self.create_publisher(JointState, "joint_states", 10)
         self.tf_broadcaster = TransformBroadcaster(self)
@@ -103,16 +110,28 @@ class QuadrupedStatePublisher(Node):
         ros_y = quad_x
         yaw = math.radians(heading_deg)
 
-        tf = TransformStamped()
-        tf.header.stamp = now.to_msg()
-        tf.header.frame_id = "world"
-        tf.child_frame_id = "quad_base_link"
-        tf.transform.translation.x = ros_x
-        tf.transform.translation.y = ros_y
-        tf.transform.translation.z = 0.0
-        tf.transform.rotation.z = math.sin(yaw / 2.0)
-        tf.transform.rotation.w = math.cos(yaw / 2.0)
-        self.tf_broadcaster.sendTransform(tf)
+        # humanoid_state_publisher.py와 동일한 이유로 "quad_base_link_target"은
+        # 항상 발행하고, "quad_base_link"는 publish_base_link가 True일
+        # 때만 발행한다 (physics_demo.launch.py는 mujoco_ball_sim이 그걸
+        # 대신 발행하므로 False로 끈다).
+        tf_target = TransformStamped()
+        tf_target.header.stamp = now.to_msg()
+        tf_target.header.frame_id = "world"
+        tf_target.child_frame_id = "quad_base_link_target"
+        tf_target.transform.translation.x = ros_x
+        tf_target.transform.translation.y = ros_y
+        tf_target.transform.translation.z = 0.0
+        tf_target.transform.rotation.z = math.sin(yaw / 2.0)
+        tf_target.transform.rotation.w = math.cos(yaw / 2.0)
+        self.tf_broadcaster.sendTransform(tf_target)
+
+        if self.publish_base_link:
+            tf_base = TransformStamped()
+            tf_base.header.stamp = now.to_msg()
+            tf_base.header.frame_id = "world"
+            tf_base.child_frame_id = "quad_base_link"
+            tf_base.transform = tf_target.transform
+            self.tf_broadcaster.sendTransform(tf_base)
 
 
 def main(args=None):

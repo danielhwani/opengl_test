@@ -9,7 +9,11 @@ idle()이 하던 걷기 애니메이션을 ROS2로 그대로 옮겨온 노드.
   읽어서 이 각도들로부터 모든 링크의 TF를 계산해 발행해준다.
 - 몸통이 humanoid_path.txt의 웨이포인트를 따라 걷는 것(path_sample,
   Catmull-Rom 스플라인)은 URDF가 표현하지 못하는 "세계 속 로봇의
-  위치"라서, 이 노드가 직접 "world" -> "base_link" TF를 발행한다.
+  위치"라서, 이 노드가 "world" -> "base_link_target" TF를 발행한다.
+  publish_base_link 파라미터(기본 True)가 켜져 있으면 같은 값을
+  "world" -> "base_link"로도 발행한다 - mujoco_ball_sim이 그 프레임을
+  물리 시뮬레이션 결과로 대신 발행할 때는(physics_demo.launch.py)
+  이 파라미터를 False로 꺼서 두 발행자가 충돌하지 않게 한다.
 
 좌표 변환: C 데모는 Y-up(X=왼쪽, Y=위, Z=앞)을 쓰고 ROS는 Z-up
 (X=앞, Y=왼쪽, Z=위)을 쓴다. humanoid.urdf를 만들 때와 똑같이
@@ -145,6 +149,9 @@ class HumanoidStatePublisher(Node):
                 f"경로 파일을 찾을 수 없어 기본 사각형 경로를 씁니다: {path_file}"
             )
 
+        self.declare_parameter("publish_base_link", True)
+        self.publish_base_link = self.get_parameter("publish_base_link").value
+
         self.t = 0.0
         self.joint_pub = self.create_publisher(JointState, "joint_states", 10)
         self.tf_broadcaster = TransformBroadcaster(self)
@@ -188,16 +195,34 @@ class HumanoidStatePublisher(Node):
         ros_y = body_x
         yaw = math.radians(heading_deg)  # 회전 부호는 그대로 유지됨 (주석 참고)
 
-        tf = TransformStamped()
-        tf.header.stamp = now.to_msg()
-        tf.header.frame_id = "world"
-        tf.child_frame_id = "base_link"
-        tf.transform.translation.x = ros_x
-        tf.transform.translation.y = ros_y
-        tf.transform.translation.z = 0.0
-        tf.transform.rotation.z = math.sin(yaw / 2.0)
-        tf.transform.rotation.w = math.cos(yaw / 2.0)
-        self.tf_broadcaster.sendTransform(tf)
+        # "base_link_target"은 항상 발행한다 - "걷기 애니메이션이
+        # 원하는" 순수 운동학적 목표 자세다. physics_demo.launch.py에서
+        # mujoco_ball_sim이 이 target을 스프링으로 따라가는 물리
+        # 시뮬레이션 결과를 "world"->"base_link"로 대신 발행하기 때문에
+        # (공에 맞으면 순간적으로 target에서 벗어났다가 다시 돌아오게),
+        # 그 경우엔 이 노드가 "base_link"를 발행하면 같은 프레임에
+        # 두 발행자가 충돌한다 - 그래서 publish_base_link 파라미터로
+        # 끌 수 있게 했다 (physics_demo.launch.py가 False로 띄움).
+        # display.launch.py(물리 데모 없음)는 기본값 True라 이 노드가
+        # 직접 "base_link"까지 발행해서 그대로 잘 보인다.
+        tf_target = TransformStamped()
+        tf_target.header.stamp = now.to_msg()
+        tf_target.header.frame_id = "world"
+        tf_target.child_frame_id = "base_link_target"
+        tf_target.transform.translation.x = ros_x
+        tf_target.transform.translation.y = ros_y
+        tf_target.transform.translation.z = 0.0
+        tf_target.transform.rotation.z = math.sin(yaw / 2.0)
+        tf_target.transform.rotation.w = math.cos(yaw / 2.0)
+        self.tf_broadcaster.sendTransform(tf_target)
+
+        if self.publish_base_link:
+            tf_base = TransformStamped()
+            tf_base.header.stamp = now.to_msg()
+            tf_base.header.frame_id = "world"
+            tf_base.child_frame_id = "base_link"
+            tf_base.transform = tf_target.transform
+            self.tf_broadcaster.sendTransform(tf_base)
 
 
 def main(args=None):

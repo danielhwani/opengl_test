@@ -3,18 +3,20 @@
     ball_collision.xml
 
     공을 떨어뜨려서 humanoid/4족 로봇과 실제로 충돌(접촉)하게 만드는
-    간단한 MuJoCo 장면. humanoid_proxy / quad_proxy는 실제 물리
-    바디가 아니라 "mocap" 바디다 - mocap 바디는 질량/관성이 적용되지
-    않고(물리 시뮬레이션의 영향을 안 받음) 자세를 외부에서 그대로
-    주입할 수 있지만, 충돌(contact)에는 정상적으로 참여한다. 그래서
-    mujoco_ball_sim.py가 매 틱 실제 humanoid_state_publisher /
-    quadruped_state_publisher가 발행하는 TF("world"->"Body",
-    "world"->"QuadBody")를 읽어서 이 두 mocap 바디의 자세로 그대로
-    복사해 넣는다 - 화면에는 안 보여도(RViz2는 Marker로 따로 그림),
-    물리적으로는 "지금 걷고 있는 humanoid/순찰 중인 4족 로봇의 몸통"
-    노릇을 한다.
+    MuJoCo 장면. humanoid_proxy / quad_proxy는 질량이 있는 진짜 물리
+    바디다(freejoint = 6DOF) - 처음엔 "mocap"(물리 영향을 안 받고
+    자세만 외부에서 주입받는) 바디로 만들었는데, 그러면 공이 부딪혀도
+    로봇이 전혀 반응하지 않아서 이렇게 바꿨다.
 
-    공(ball)만 진짜 물리 바디(freejoint = 6DOF 자유낙하 + 중력)다.
+    평소에는 mujoco_ball_sim.py가 "지금 이 순간 걷고 있는/순찰 중인
+    실제 목표 자세"(humanoid_state_publisher/quadruped_state_publisher가
+    발행하는 "world"->"Body_target" 격 TF)를 향해 가상의 스프링-댐퍼
+    힘/토크를 매 틱 걸어준다(data.xfrc_applied) - 그래서 평소엔 그
+    목표 자세를 그대로 따라가며 걷는 것처럼 보이지만, 공에 맞으면
+    스프링이 늘어나면서 순간적으로 흔들리다가 다시 목표로 돌아온다.
+
+    공(ball)은 그 스프링 없이 순수하게 자유낙하 + 중력 + 충돌 반응만
+    한다.
   -->
   <option gravity="0 0 -9.81" timestep="0.005"/>
 
@@ -24,18 +26,23 @@
 
     <!-- humanoid 몸통 충돌 프록시 - gen_humanoid_assets.c의
          BODY_D/BODY_W/BODY_H(0.5/0.8/1.4)를 half-size로 바꾼 값
-         (MuJoCo box size는 half-extent). -->
-    <!-- 초기 pos는 TF가 아직 안 들어왔을 때 공과 괜히 충돌하지 않도록
-         일부러 장면 밖(100,100)에 둔다 - 노드가 TF를 받는 즉시 매 틱
-         실제 위치로 옮긴다. -->
-    <body name="humanoid_proxy" mocap="true" pos="100 100 2">
-      <geom type="box" size="0.25 0.4 0.7" rgba="0.55 0.55 0.65 1"/>
+         (MuJoCo box size는 half-extent). 질량(mass)은 임의로 정한
+         값이라(사람 몸통 전체 무게를 정확히 반영한 게 아님) 튜닝
+         대상이다 - mujoco_ball_sim.py의 SPRING_KP_POS 등과 같이
+         맞춰봐야 한다.
+         초기 pos는 TF가 아직 안 들어왔을 때 공과 괜히 충돌하지
+         않도록 일부러 장면 밖(100,100)에 둔다 - 노드가 TF를 받는
+         즉시 그 자리로 "스냅"하고, 그 뒤로는 스프링으로 따라간다. -->
+    <body name="humanoid_proxy" pos="100 100 2">
+      <freejoint/>
+      <geom type="box" size="0.25 0.4 0.7" mass="15" rgba="0.55 0.55 0.65 1"/>
     </body>
 
     <!-- 4족 로봇 몸통 충돌 프록시 - QUAD_BODY_L/QUAD_BODY_W/
          QUAD_BODY_H(1.2/0.5/0.4)를 half-size로 바꾼 값. -->
-    <body name="quad_proxy" mocap="true" pos="100 100 2">
-      <geom type="box" size="0.6 0.25 0.2" rgba="0.50 0.55 0.60 1"/>
+    <body name="quad_proxy" pos="100 100 2">
+      <freejoint/>
+      <geom type="box" size="0.6 0.25 0.2" mass="10" rgba="0.50 0.55 0.60 1"/>
     </body>
 
     <body name="ball" pos="0 0 3">
