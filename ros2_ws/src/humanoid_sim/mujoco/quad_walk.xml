@@ -1,0 +1,119 @@
+<mujoco model="quad_walk">
+  <!--
+    quad_walk.xml
+
+    4족 로봇의 실제 관절 구동 보행 시뮬레이션용 MJCF. ball_collision.xml과
+    같은 패턴으로 손으로 직접 작성했다(gen_humanoid_assets.c가 생성하는
+    게 아님) - 치수는 gen_humanoid_assets.c의 QUAD_* 상수(줄 60-77)에서
+    그대로 가져왔다:
+      QUAD_BODY_L/W/H = 1.2 / 0.5 / 0.4
+      QUAD_HEAD_SIZE  = 0.3  (head_x=QUAD_BODY_L/2+QUAD_HEAD_SIZE*0.45≈0.735,
+                               head_z=QUAD_BODY_H*0.15≈0.06)
+      QUAD_LEG_LEN    = 0.55, QUAD_LEG_W(지름) = 0.12
+      QUAD_HIP_X      = QUAD_BODY_W/2 = 0.25
+      QUAD_HIP_Z_FRONT/BACK = ±(QUAD_BODY_L/2 - QUAD_LEG_D/2) = ±0.54
+      관절 제한 ±45도 = ±0.7854 rad (QUAD_LEG_JOINT_LIMIT_RAD)
+
+    quadruped.urdf와 똑같이 ROS 좌표계(X=앞, Y=왼쪽, Z=위)를 그대로
+    쓴다 - 별도 축 변환 없음. 관절 이름(quadbody_to_QuadLegFL 등)도
+    URDF와 똑같이 맞춰서, quad_mujoco_walk.py가 여기서 나온 관절각을
+    그대로 /quadruped/joint_states로 발행하면 기존 quadruped.urdf의
+    시각적 메쉬(robot_state_publisher가 그림)가 그대로 맞게 그려진다 -
+    이 파일 자체는 물리/충돌 전용이고, 눈에 보이는 메쉬는 URDF 쪽이다.
+
+    mujoco_ball_sim.py의 "가상 스프링을 xfrc_applied로 직접 미는"
+    방식과 다르게, 여기는 MuJoCo 네이티브 <position> 액추에이터(PD
+    위치 서보)로 다리 관절을 직접 구동한다 - 더 단순하고
+    integrator="implicitfast"의 암묵적 적분 이득을 받아 지난 세션
+    내내 겪은 xfrc_applied 기반 불안정(리밋 사이클 등)을 피할 수
+    있을 것으로 기대한다. 다리 충돌 모양은 URDF 쪽 시각 메쉬(박스)와
+    달리 캡슐을 쓴다 - 바닥과의 접촉이 박스 모서리보다 훨씬 안정적인
+    건 흔한 MuJoCo 레그드 로봇 관행이다.
+
+    kp/kv(액추에이터 게인)와 트롯 진폭(30도)은 독립 MuJoCo 스크립트
+    (ROS 없이 mj_step만 반복, README 참고)로 확인했다 - kp=80->150로
+    올리니 전진 속도가 조금 나아졌고, 진폭을 45도로 올려봤더니
+    오히려 더 주저앉고 느려져서(다리가 수직에서 많이 벗어난 시간이
+    길어져 평균 지지 높이가 낮아짐) 30도로 되돌렸다. 10초 동안
+    쓰러지지 않고(최대 기울기 1도 미만) 약 0.2m 순전진 - 느리지만
+    동작은 확인됐다. 다리 1개당 자유도가 1개(무릎 없음)라 이 이상
+    크게 빨라지긴 어려울 수 있다.
+  -->
+  <compiler angle="radian"/>
+  <option gravity="0 0 -9.81" timestep="0.005" integrator="implicitfast"/>
+
+  <!-- 조명: 처음엔 빛 하나(아래 light)뿐이었는데, 기본 원뿔(cutoff
+       45도)이라 그 바로 아래 좁은 영역만 밝고 로봇이 거기서 멀어지면
+       (걷다 보면 금방 벗어남) 가장자리가 어두워졌다. headlight의
+       ambient/diffuse를 올려서 카메라 위치와 무관하게 장면 전체에
+       고르게 깔리는 기본 밝기를 더하고, light 자체도 directional
+       (원뿔/거리감쇠 없는 평행광, 태양光처럼 장면 전체를 고르게
+       비춤)로 바꿨다. -->
+  <visual>
+    <headlight ambient="0.2 0.2 0.2" diffuse="0.3 0.3 0.3" specular="0.1 0.1 0.1"/>
+  </visual>
+
+  <worldbody>
+    <light pos="0 0 5" dir="0 0 -1" diffuse="1 1 1" directional="true" ambient="0.1 0.1 0.1"/>
+    <!-- size는 충돌(물리)과 무관하다 - MuJoCo의 plane은 size와 상관없이
+         충돌 처리상 무한해서, 이 타일 밖으로 나가도 떨어지지 않는다.
+         이건 순전히 "화면에 얼마나 넓게 그릴지"만 정한다. 로봇이
+         5분에 약 48m까지 걸어갈 수 있는 걸 확인해서(README의 "속도
+         개선" 섹션), 타일 밖으로 나가 허허벌판을 걷는 것처럼 보이지
+         않게 20(40x40m)에서 150(300x300m)으로 넉넉하게 키웠다. -->
+    <geom name="ground" type="plane" size="150 150 0.1" rgba="0.42 0.30 0.18 1"/>
+
+    <!-- 시작 높이 0.75 = QUAD_LEG_LEN(0.55) + QUAD_BODY_H/2(0.2) =
+         URDF의 base_to_body_z와 동일 - 다리가 수직(관절각 0)일 때
+         발끝이 땅(z=0)에 정확히 닿는 높이. -->
+    <body name="quad_body" pos="0 0 0.75">
+      <freejoint/>
+      <geom name="body_geom" type="box" size="0.6 0.25 0.2" mass="4.0" rgba="0.50 0.55 0.60 1"/>
+      <geom name="head_geom" type="box" pos="0.735 0 0.06" size="0.15 0.15 0.15" mass="0.3" rgba="0.60 0.62 0.65 1"/>
+
+      <body name="leg_FL" pos="0.54 0.25 0">
+        <joint name="quadbody_to_QuadLegFL" type="hinge" axis="0 1 0" range="-0.7854 0.7854"/>
+        <geom type="capsule" fromto="0 0 0 0 0 -0.275" size="0.06" mass="0.15" rgba="0.35 0.35 0.40 1"/>
+        <body name="shin_FL" pos="0 0 -0.275">
+          <joint name="QuadLegFL_to_QuadShinFL" type="hinge" axis="0 1 0" range="0 1.5708"/>
+          <geom type="capsule" fromto="0 0 0 0 0 -0.275" size="0.05" mass="0.15" rgba="0.30 0.30 0.35 1"/>
+        </body>
+      </body>
+      <body name="leg_FR" pos="0.54 -0.25 0">
+        <joint name="quadbody_to_QuadLegFR" type="hinge" axis="0 1 0" range="-0.7854 0.7854"/>
+        <geom type="capsule" fromto="0 0 0 0 0 -0.275" size="0.06" mass="0.15" rgba="0.35 0.35 0.40 1"/>
+        <body name="shin_FR" pos="0 0 -0.275">
+          <joint name="QuadLegFR_to_QuadShinFR" type="hinge" axis="0 1 0" range="0 1.5708"/>
+          <geom type="capsule" fromto="0 0 0 0 0 -0.275" size="0.05" mass="0.15" rgba="0.30 0.30 0.35 1"/>
+        </body>
+      </body>
+      <body name="leg_BL" pos="-0.54 0.25 0">
+        <joint name="quadbody_to_QuadLegBL" type="hinge" axis="0 1 0" range="-0.7854 0.7854"/>
+        <geom type="capsule" fromto="0 0 0 0 0 -0.275" size="0.06" mass="0.15" rgba="0.35 0.35 0.40 1"/>
+        <body name="shin_BL" pos="0 0 -0.275">
+          <joint name="QuadLegBL_to_QuadShinBL" type="hinge" axis="0 1 0" range="0 1.5708"/>
+          <geom type="capsule" fromto="0 0 0 0 0 -0.275" size="0.05" mass="0.15" rgba="0.30 0.30 0.35 1"/>
+        </body>
+      </body>
+      <body name="leg_BR" pos="-0.54 -0.25 0">
+        <joint name="quadbody_to_QuadLegBR" type="hinge" axis="0 1 0" range="-0.7854 0.7854"/>
+        <geom type="capsule" fromto="0 0 0 0 0 -0.275" size="0.06" mass="0.15" rgba="0.35 0.35 0.40 1"/>
+        <body name="shin_BR" pos="0 0 -0.275">
+          <joint name="QuadLegBR_to_QuadShinBR" type="hinge" axis="0 1 0" range="0 1.5708"/>
+          <geom type="capsule" fromto="0 0 0 0 0 -0.275" size="0.05" mass="0.15" rgba="0.30 0.30 0.35 1"/>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <position name="act_FL" joint="quadbody_to_QuadLegFL" kp="150" kv="6"/>
+    <position name="act_FR" joint="quadbody_to_QuadLegFR" kp="150" kv="6"/>
+    <position name="act_BL" joint="quadbody_to_QuadLegBL" kp="150" kv="6"/>
+    <position name="act_BR" joint="quadbody_to_QuadLegBR" kp="150" kv="6"/>
+    <position name="act_knee_FL" joint="QuadLegFL_to_QuadShinFL" kp="150" kv="6"/>
+    <position name="act_knee_FR" joint="QuadLegFR_to_QuadShinFR" kp="150" kv="6"/>
+    <position name="act_knee_BL" joint="QuadLegBL_to_QuadShinBL" kp="150" kv="6"/>
+    <position name="act_knee_BR" joint="QuadLegBR_to_QuadShinBR" kp="150" kv="6"/>
+  </actuator>
+</mujoco>

@@ -15,15 +15,23 @@ Visualization Manager:
     - Class: rviz_default_plugins/RobotModel
       Enabled: true
       Name: Humanoid
+      Description Source: Topic
       Description Topic:
         Value: /humanoid/robot_description
+      Visual Enabled: true
+      Collision Enabled: false
+      Alpha: 1
       TF Prefix: ""
       Value: true
     - Class: rviz_default_plugins/RobotModel
       Enabled: true
       Name: Quadruped
+      Description Source: Topic
       Description Topic:
         Value: /quadruped/robot_description
+      Visual Enabled: true
+      Collision Enabled: false
+      Alpha: 1
       TF Prefix: ""
       Value: true
     - Class: rviz_default_plugins/MarkerArray

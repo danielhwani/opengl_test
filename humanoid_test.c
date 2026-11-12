@@ -782,7 +782,12 @@ static void draw_trees(void) {
 #define QUAD_BODY_H 0.4
 #define QUAD_HEAD_SIZE 0.3
 #define QUAD_LEG_W 0.12
-#define QUAD_LEG_LEN 0.55
+/* 무릎 관절 추가 - gen_humanoid_assets.c와 동일한 이유/치수로
+   허벅지+종아리 2 세그먼트로 나눴다(그 파일 QUAD_THIGH_LEN 주석
+   참고 - 총 길이 보존, 독립 MuJoCo 검증으로 찾은 진폭 15도). */
+#define QUAD_THIGH_LEN 0.275
+#define QUAD_SHIN_LEN 0.275
+#define QUAD_LEG_LEN (QUAD_THIGH_LEN + QUAD_SHIN_LEN)
 #define QUAD_LEG_D 0.12
 #define QUAD_HIP_X (QUAD_BODY_W / 2.0)
 #define QUAD_HIP_Z_FRONT (QUAD_BODY_L / 2.0 - QUAD_LEG_D / 2.0)
@@ -821,10 +826,14 @@ static void load_quad_patrol(const char *filename) {
 
 static double quad_x = 0.0;
 static double quad_heading = 90.0; /* degrees, y축 둘레 회전 */
-static double quad_fl_angle = 0.0; /* front-left */
-static double quad_fr_angle = 0.0; /* front-right */
-static double quad_bl_angle = 0.0; /* back-left */
-static double quad_br_angle = 0.0; /* back-right */
+static double quad_fl_angle = 0.0; /* front-left (hip) */
+static double quad_fr_angle = 0.0; /* front-right (hip) */
+static double quad_bl_angle = 0.0; /* back-left (hip) */
+static double quad_br_angle = 0.0; /* back-right (hip) */
+static double quad_fl_knee_angle = 0.0;
+static double quad_fr_knee_angle = 0.0;
+static double quad_bl_knee_angle = 0.0;
+static double quad_br_knee_angle = 0.0;
 
 static void draw_quad_body(void) {
     glPushMatrix();
@@ -845,8 +854,17 @@ static void draw_quad_head(void) {
 static void draw_quad_leg(void) {
     glPushMatrix();
     if (!rendering_shadow) glColor3f(0.35f, 0.35f, 0.40f);
-    glTranslated(0.0, -QUAD_LEG_LEN / 2.0, 0.0);
-    glScaled(QUAD_LEG_W, QUAD_LEG_LEN, QUAD_LEG_D);
+    glTranslated(0.0, -QUAD_THIGH_LEN / 2.0, 0.0);
+    glScaled(QUAD_LEG_W, QUAD_THIGH_LEN, QUAD_LEG_D);
+    glutSolidCube(1.0);
+    glPopMatrix();
+}
+
+static void draw_quad_shin(void) {
+    glPushMatrix();
+    if (!rendering_shadow) glColor3f(0.35f, 0.35f, 0.40f);
+    glTranslated(0.0, -QUAD_SHIN_LEN / 2.0, 0.0);
+    glScaled(QUAD_LEG_W, QUAD_SHIN_LEN, QUAD_LEG_D);
     glutSolidCube(1.0);
     glPopMatrix();
 }
@@ -874,24 +892,44 @@ static void draw_quadruped(void) {
             glTranslated(-QUAD_HIP_X, 0.0, QUAD_HIP_Z_FRONT);
             glRotated(quad_fl_angle, 1, 0, 0);
             draw_quad_leg();
+            glPushMatrix();
+                glTranslated(0.0, -QUAD_THIGH_LEN, 0.0); /* 무릎: 허벅지 끝 */
+                glRotated(quad_fl_knee_angle, 1, 0, 0);
+                draw_quad_shin();
+            glPopMatrix();
         glPopMatrix();
 
         glPushMatrix();
             glTranslated(QUAD_HIP_X, 0.0, QUAD_HIP_Z_FRONT);
             glRotated(quad_fr_angle, 1, 0, 0);
             draw_quad_leg();
+            glPushMatrix();
+                glTranslated(0.0, -QUAD_THIGH_LEN, 0.0);
+                glRotated(quad_fr_knee_angle, 1, 0, 0);
+                draw_quad_shin();
+            glPopMatrix();
         glPopMatrix();
 
         glPushMatrix();
             glTranslated(-QUAD_HIP_X, 0.0, QUAD_HIP_Z_BACK);
             glRotated(quad_bl_angle, 1, 0, 0);
             draw_quad_leg();
+            glPushMatrix();
+                glTranslated(0.0, -QUAD_THIGH_LEN, 0.0);
+                glRotated(quad_bl_knee_angle, 1, 0, 0);
+                draw_quad_shin();
+            glPopMatrix();
         glPopMatrix();
 
         glPushMatrix();
             glTranslated(QUAD_HIP_X, 0.0, QUAD_HIP_Z_BACK);
             glRotated(quad_br_angle, 1, 0, 0);
             draw_quad_leg();
+            glPushMatrix();
+                glTranslated(0.0, -QUAD_THIGH_LEN, 0.0);
+                glRotated(quad_br_knee_angle, 1, 0, 0);
+                draw_quad_shin();
+            glPopMatrix();
         glPopMatrix();
     glPopMatrix();
 }
@@ -1028,6 +1066,28 @@ static void idle(void) {
     quad_br_angle = quad_swing;
     quad_fr_angle = -quad_swing;
     quad_bl_angle = -quad_swing;
+
+    /* 무릎: humanoid_loader_test.c와 동일한 공식/진폭(ROS2/MuJoCo
+       물리 보행 데모에서 ROS 없이 mj_step만 반복하는 독립 스크립트로
+       찾음 - 진폭 15도, 16도부터 급격히 불안정/17도부터 넘어짐).
+       여기는 순수 기구학적 애니메이션이라 물리적 의미는 없지만
+       일관성 있게 같은 공식을 쓴다. */
+    {
+        double quad_phase = 2.0 * t;
+        /* 물리 보행 데모(quad_mujoco_walk.py)는 안정성 때문에 15도로
+           제한했지만, 여기는 순수 기구학적 애니메이션이라 그 제약이
+           없다 - 15도로는 눈에 거의 안 보여서("다리가 아직 뻣뻣하다"는
+           피드백을 받음) 훨씬 크게(45도) 키웠다. */
+        double knee_amp = 45.0;
+        double fl_br_bend = -cos(quad_phase);
+        double fr_bl_bend = -cos(quad_phase + CAM_PI);
+        if (fl_br_bend < 0.0) fl_br_bend = 0.0;
+        if (fr_bl_bend < 0.0) fr_bl_bend = 0.0;
+        quad_fl_knee_angle = fl_br_bend * knee_amp;
+        quad_br_knee_angle = fl_br_bend * knee_amp;
+        quad_fr_knee_angle = fr_bl_bend * knee_amp;
+        quad_bl_knee_angle = fr_bl_bend * knee_amp;
+    }
     glutPostRedisplay();
 }
 

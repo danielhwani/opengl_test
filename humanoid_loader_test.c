@@ -193,10 +193,14 @@ static int main_mode = MAIN_MODE_PATH;
    앞에 선언해야 한다. */
 static double quad_x = 0.0;
 static double quad_heading = 90.0; /* degrees, y축 둘레 회전 */
-static double quad_fl_angle = 0.0; /* front-left */
-static double quad_fr_angle = 0.0; /* front-right */
-static double quad_bl_angle = 0.0; /* back-left */
-static double quad_br_angle = 0.0; /* back-right */
+static double quad_fl_angle = 0.0; /* front-left (hip) */
+static double quad_fr_angle = 0.0; /* front-right (hip) */
+static double quad_bl_angle = 0.0; /* back-left (hip) */
+static double quad_br_angle = 0.0; /* back-right (hip) */
+static double quad_fl_knee_angle = 0.0;
+static double quad_fr_knee_angle = 0.0;
+static double quad_bl_knee_angle = 0.0;
+static double quad_br_knee_angle = 0.0;
 static int lighting = 1;
 static int texturing = 1;
 static GLuint texture_id = 0;
@@ -436,6 +440,10 @@ static double angle_for_part(const char *name) {
     if (strcmp(name, "QuadLegFR") == 0) return quad_fr_angle;
     if (strcmp(name, "QuadLegBL") == 0) return quad_bl_angle;
     if (strcmp(name, "QuadLegBR") == 0) return quad_br_angle;
+    if (strcmp(name, "QuadShinFL") == 0) return quad_fl_knee_angle;
+    if (strcmp(name, "QuadShinFR") == 0) return quad_fr_knee_angle;
+    if (strcmp(name, "QuadShinBL") == 0) return quad_bl_knee_angle;
+    if (strcmp(name, "QuadShinBR") == 0) return quad_br_knee_angle;
     return 0.0;
 }
 
@@ -941,6 +949,31 @@ static void idle(void) {
     quad_br_angle = quad_swing;
     quad_fr_angle = -quad_swing;
     quad_bl_angle = -quad_swing;
+
+    /* 무릎: "엉덩이가 스윙(발을 앞으로 가져가는 구간)일 때 굽히고,
+       스탠스(바닥을 미는 구간)일 때는 펴지는" 신호 - ROS2/MuJoCo
+       물리 보행 데모(ros2_ws/.../quad_mujoco_walk.py)에서 ROS 없이
+       mj_step만 반복하는 독립 스크립트로 쓸어서 찾은 공식/진폭을
+       그대로 가져왔다(진폭 15도 - 16도부터 급격히 불안정, 17도부터
+       넘어짐을 확인했다). 여기는 순수 기구학적 애니메이션이라 물리적
+       의미는 없지만, 일관성 있게 같은 공식을 쓴다. 음수가 안 나오게
+       (무릎은 한쪽으로만 굽혀지므로) 0 아래는 자른다. */
+    {
+        double quad_phase = 2.0 * t;      /* quad_swing과 같은 위상 */
+        /* 물리 보행 데모(quad_mujoco_walk.py)는 안정성 때문에 15도로
+           제한했지만, 여기는 순수 기구학적 애니메이션이라 그 제약이
+           없다 - 15도로는 눈에 거의 안 보여서("다리가 아직 뻣뻣하다"는
+           피드백을 받음) 훨씬 크게(45도) 키웠다. */
+        double knee_amp = 45.0;           /* degrees */
+        double fl_br_bend = -cos(quad_phase);
+        double fr_bl_bend = -cos(quad_phase + CAM_PI);
+        if (fl_br_bend < 0.0) fl_br_bend = 0.0;
+        if (fr_bl_bend < 0.0) fr_bl_bend = 0.0;
+        quad_fl_knee_angle = fl_br_bend * knee_amp;
+        quad_br_knee_angle = fl_br_bend * knee_amp;
+        quad_fr_knee_angle = fr_bl_bend * knee_amp;
+        quad_bl_knee_angle = fr_bl_bend * knee_amp;
+    }
 
     glutPostRedisplay();
 }

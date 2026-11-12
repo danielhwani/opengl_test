@@ -15,7 +15,8 @@
  *
  * 출력:
  *   body.obj, head.obj, arm.obj, leg.obj,
- *   quad_body.obj, quad_head.obj, quad_leg.obj   - OpenGL 데모용 Y-up OBJ 메쉬
+ *   quad_body.obj, quad_head.obj, quad_leg.obj,
+ *   quad_shin.obj                                 - OpenGL 데모용 Y-up OBJ 메쉬
  *   *_ros.obj (위와 같은 이름들)                  - URDF용 Z-up OBJ 메쉬
  *   humanoid_scene.txt                            - 부위 이름/메쉬/부모/위치/관절/색 정보
  *   humanoid.urdf / humanoid_extra.yaml           - humanoid의 URDF + 보조 정보
@@ -62,7 +63,20 @@
 #define QUAD_BODY_H 0.4
 #define QUAD_HEAD_SIZE 0.3
 #define QUAD_LEG_W 0.12
-#define QUAD_LEG_LEN 0.55
+/* 무릎 관절 추가 - 뻣뻣한 막대 1개(QUAD_LEG_LEN)였던 다리를 허벅지+
+   종아리 2 세그먼트로 나눴다. 다리가 펴진(무릎각 0) 상태의 총
+   길이가 그대로 보존되도록 QUAD_LEG_LEN을 두 세그먼트 길이의 합으로
+   다시 정의했다 - 그래서 base_to_body_z 등 QUAD_LEG_LEN을 참조하는
+   기존 "서있는 높이" 계산은 전혀 안 건드려도 된다. 물리 보행
+   데모(ros2_ws/.../mujoco/quad_walk.xml)에서 ROS 없이 mj_step만
+   반복하는 독립 스크립트로 검증했다: 무릎 없을 때 10초에 0.88m
+   전진하던 게, 무릎을 "엉덩이가 스윙하는 동안 굽히고 스탠스일 때
+   펴지는" 신호(진폭 15도)로 움직이자 10초에 5.26m로(약 6배) 늘고
+   기울기도 더 안정적이었다(16도부터 급격히 불안정, 17도부터
+   넘어짐 - 15도가 한계 바로 아래 안전한 값). */
+#define QUAD_THIGH_LEN 0.275
+#define QUAD_SHIN_LEN 0.275
+#define QUAD_LEG_LEN (QUAD_THIGH_LEN + QUAD_SHIN_LEN)
 #define QUAD_LEG_D 0.12
 #define QUAD_HIP_X (QUAD_BODY_W / 2.0)
 #define QUAD_HIP_Z_FRONT (QUAD_BODY_L / 2.0 - QUAD_LEG_D / 2.0)
@@ -75,6 +89,9 @@
 #define ARM_JOINT_LIMIT_RAD (45.0 * PI / 180.0)
 #define LEG_JOINT_LIMIT_RAD (35.0 * PI / 180.0)
 #define QUAD_LEG_JOINT_LIMIT_RAD (45.0 * PI / 180.0)
+/* 무릎은 실제 무릎처럼 한쪽으로만(0=쭉 뻗음 ~ 90도=최대로 굽힘)
+   굽혀진다 - 엉덩이처럼 좌우 대칭 범위가 아니다. */
+#define QUAD_KNEE_JOINT_LIMIT_RAD (90.0 * PI / 180.0)
 
 /* 부위별 색 - 한 곳에서만 정의한다. write_scene()(humanoid_scene.txt,
    OpenGL 로더 버전이 읽음), write_humanoid_urdf()/write_quadruped_urdf()
@@ -338,6 +355,20 @@ static void write_scene(const char *filename) {
     fprintf(f, "QuadLegBR  quad_leg.obj   QuadBody   %.4f     0.0      %.4f  ROTX   %.2f  %.2f  %.2f\n",
             QUAD_HIP_X, QUAD_HIP_Z_BACK, COLOR_QUAD_LEG.r, COLOR_QUAD_LEG.g, COLOR_QUAD_LEG.b);
 
+    /* 종아리(무릎 아래) - 부모가 QuadBody가 아니라 각자의 QuadLegXX
+       (허벅지)다. 자식의 (tx,ty,tz) 오프셋은 부모의 회전(엉덩이
+       각도)까지 적용된 뒤의 부모 로컬 프레임 기준이라 - 허벅지 끝
+       (로컬 -y 방향으로 QUAD_THIGH_LEN만큼)에 그대로 넣으면, 엉덩이가
+       돌아가도 무릎 부착점이 자동으로 같이 따라간다(순방향 기구학). */
+    fprintf(f, "QuadShinFL quad_shin.obj  QuadLegFL  0.0      %.4f    0.0  ROTX   %.2f  %.2f  %.2f\n",
+            -QUAD_THIGH_LEN, COLOR_QUAD_LEG.r, COLOR_QUAD_LEG.g, COLOR_QUAD_LEG.b);
+    fprintf(f, "QuadShinFR quad_shin.obj  QuadLegFR  0.0      %.4f    0.0  ROTX   %.2f  %.2f  %.2f\n",
+            -QUAD_THIGH_LEN, COLOR_QUAD_LEG.r, COLOR_QUAD_LEG.g, COLOR_QUAD_LEG.b);
+    fprintf(f, "QuadShinBL quad_shin.obj  QuadLegBL  0.0      %.4f    0.0  ROTX   %.2f  %.2f  %.2f\n",
+            -QUAD_THIGH_LEN, COLOR_QUAD_LEG.r, COLOR_QUAD_LEG.g, COLOR_QUAD_LEG.b);
+    fprintf(f, "QuadShinBR quad_shin.obj  QuadLegBR  0.0      %.4f    0.0  ROTX   %.2f  %.2f  %.2f\n",
+            -QUAD_THIGH_LEN, COLOR_QUAD_LEG.r, COLOR_QUAD_LEG.g, COLOR_QUAD_LEG.b);
+
     fclose(f);
     printf("wrote %s\n", filename);
 }
@@ -552,9 +583,11 @@ static void write_quadruped_urdf(const char *filename) {
 
     {
         static const char *leg_names[4] = {"QuadLegFL", "QuadLegFR", "QuadLegBL", "QuadLegBR"};
+        static const char *shin_names[4] = {"QuadShinFL", "QuadShinFR", "QuadShinBL", "QuadShinBR"};
         double leg_x[4] = {QUAD_HIP_Z_FRONT, QUAD_HIP_Z_FRONT, QUAD_HIP_Z_BACK, QUAD_HIP_Z_BACK};
         double leg_y[4] = {-QUAD_HIP_X, QUAD_HIP_X, -QUAD_HIP_X, QUAD_HIP_X};
         for (int i = 0; i < 4; i++) {
+            /* 허벅지(엉덩이 관절 - 기존과 동일, 좌우 대칭 범위) */
             fprintf(f, "  <joint name=\"quadbody_to_%s\" type=\"revolute\">\n", leg_names[i]);
             fprintf(f, "    <parent link=\"QuadBody\"/>\n");
             fprintf(f, "    <child link=\"%s\"/>\n", leg_names[i]);
@@ -568,6 +601,25 @@ static void write_quadruped_urdf(const char *filename) {
             fprintf(f, "      <geometry><mesh filename=\"" ASSET_URI_PREFIX "quad_leg_ros.obj\"/></geometry>\n");
             fprintf(f, "      <material name=\"%s_material\"><color rgba=\"%.2f %.2f %.2f 1.0\"/></material>\n",
                     leg_names[i], COLOR_QUAD_LEG.r, COLOR_QUAD_LEG.g, COLOR_QUAD_LEG.b);
+            fprintf(f, "    </visual>\n");
+            fprintf(f, "  </link>\n\n");
+
+            /* 종아리(무릎 관절 - 한쪽으로만 0~90도 굽혀짐). 부모가
+               QuadBody가 아니라 방금 쓴 허벅지 링크고, 원점은
+               허벅지 메쉬가 매달린 끝(-QUAD_THIGH_LEN)이다. */
+            fprintf(f, "  <joint name=\"%s_to_%s\" type=\"revolute\">\n", leg_names[i], shin_names[i]);
+            fprintf(f, "    <parent link=\"%s\"/>\n", leg_names[i]);
+            fprintf(f, "    <child link=\"%s\"/>\n", shin_names[i]);
+            fprintf(f, "    <origin xyz=\"0 0 %.4f\" rpy=\"0 0 0\"/>\n", -QUAD_THIGH_LEN);
+            fprintf(f, "    <axis xyz=\"0 1 0\"/>\n");
+            fprintf(f, "    <limit lower=\"0\" upper=\"%.4f\" effort=\"10\" velocity=\"2\"/>\n",
+                    QUAD_KNEE_JOINT_LIMIT_RAD);
+            fprintf(f, "  </joint>\n\n");
+            fprintf(f, "  <link name=\"%s\">\n", shin_names[i]);
+            fprintf(f, "    <visual>\n");
+            fprintf(f, "      <geometry><mesh filename=\"" ASSET_URI_PREFIX "quad_shin_ros.obj\"/></geometry>\n");
+            fprintf(f, "      <material name=\"%s_material\"><color rgba=\"%.2f %.2f %.2f 1.0\"/></material>\n",
+                    shin_names[i], COLOR_QUAD_LEG.r, COLOR_QUAD_LEG.g, COLOR_QUAD_LEG.b);
             fprintf(f, "    </visual>\n");
             fprintf(f, "  </link>\n\n");
         }
@@ -732,6 +784,17 @@ static void write_quadruped_extra_yaml(const char *filename) {
     fprintf(f, "    QuadLegBR: \"+swing\"\n");
     fprintf(f, "    QuadLegFR: \"-swing\"\n");
     fprintf(f, "    QuadLegBL: \"-swing\"\n");
+    fprintf(f, "  # 무릎(QuadShinFL 등) - 엉덩이가 스윙(발을 앞으로 가져가는\n");
+    fprintf(f, "  # 구간)일 때 굽히고 스탠스일 때 펴진다. 진폭 15도는 ROS2/MuJoCo\n");
+    fprintf(f, "  # 물리 보행 데모(ros2_ws/.../quad_mujoco_walk.py)에서 ROS 없이\n");
+    fprintf(f, "  # mj_step만 반복하는 독립 스크립트로 쓸어서 찾은 값이다(16도부터\n");
+    fprintf(f, "  # 급격히 불안정, 17도부터 넘어짐 - 15도가 한계 바로 아래 안전한 값).\n");
+    fprintf(f, "  knee_bend_deg: \"15 * max(0, -cos(hip_phase))\"\n");
+    fprintf(f, "  knee_phase:\n");
+    fprintf(f, "    QuadShinFL: \"same as QuadLegFL hip phase\"\n");
+    fprintf(f, "    QuadShinBR: \"same as QuadLegBR hip phase\"\n");
+    fprintf(f, "    QuadShinFR: \"same as QuadLegFR hip phase (opposite of FL/BR)\"\n");
+    fprintf(f, "    QuadShinBL: \"same as QuadLegBL hip phase (opposite of FL/BR)\"\n");
     fprintf(f, "  joint_axis_note: \"위 각도는 ours의 ROTX(=urdf의 axis 0 1 0) 회전각이다\"\n");
     fprintf(f, "  patrol:\n");
     fprintf(f, "    axis: world X (ros) / ours X (고정된 z=quad_patrol_z 위에서 x만 왕복)\n");
@@ -777,8 +840,14 @@ int main(void) {
                    -QUAD_BODY_H / 2.0, QUAD_BODY_H / 2.0, -QUAD_BODY_L / 2.0, QUAD_BODY_L / 2.0);
     write_box_obj("quad_head.obj", -QUAD_HEAD_SIZE / 2.0, QUAD_HEAD_SIZE / 2.0,
                    -QUAD_HEAD_SIZE / 2.0, QUAD_HEAD_SIZE / 2.0, -QUAD_HEAD_SIZE / 2.0, QUAD_HEAD_SIZE / 2.0);
+    /* 허벅지(엉덩이 관절에서 아래로 매달림, 길이 QUAD_THIGH_LEN)와
+       종아리(무릎 관절에서 아래로 매달림, 길이 QUAD_SHIN_LEN) -
+       둘을 합치면 예전 한 덩어리 다리(QUAD_LEG_LEN)와 총 길이가
+       같다. */
     write_box_obj("quad_leg.obj", -QUAD_LEG_W / 2.0, QUAD_LEG_W / 2.0,
-                   -QUAD_LEG_LEN, 0.0, -QUAD_LEG_D / 2.0, QUAD_LEG_D / 2.0);
+                   -QUAD_THIGH_LEN, 0.0, -QUAD_LEG_D / 2.0, QUAD_LEG_D / 2.0);
+    write_box_obj("quad_shin.obj", -QUAD_LEG_W / 2.0, QUAD_LEG_W / 2.0,
+                   -QUAD_SHIN_LEN, 0.0, -QUAD_LEG_D / 2.0, QUAD_LEG_D / 2.0);
 
     write_scene("humanoid_scene.txt");
 
@@ -804,7 +873,9 @@ int main(void) {
     write_box_obj("quad_head_ros.obj", -QUAD_HEAD_SIZE / 2.0, QUAD_HEAD_SIZE / 2.0,
                    -QUAD_HEAD_SIZE / 2.0, QUAD_HEAD_SIZE / 2.0, -QUAD_HEAD_SIZE / 2.0, QUAD_HEAD_SIZE / 2.0);
     write_box_obj("quad_leg_ros.obj", -QUAD_LEG_D / 2.0, QUAD_LEG_D / 2.0,
-                   -QUAD_LEG_W / 2.0, QUAD_LEG_W / 2.0, -QUAD_LEG_LEN, 0.0);
+                   -QUAD_LEG_W / 2.0, QUAD_LEG_W / 2.0, -QUAD_THIGH_LEN, 0.0);
+    write_box_obj("quad_shin_ros.obj", -QUAD_LEG_D / 2.0, QUAD_LEG_D / 2.0,
+                   -QUAD_LEG_W / 2.0, QUAD_LEG_W / 2.0, -QUAD_SHIN_LEN, 0.0);
 
     /* *_ros.obj 각각에 URDF의 <material> 색과 똑같은 색을 담은 .mtl을
        박아 넣는다 - RViz2가 URDF 재질을 무시하고 민무늬로 그리는
@@ -819,6 +890,8 @@ int main(void) {
     bake_material_into_obj("quad_head_ros.obj", "quad_head_ros.mtl",
                             COLOR_QUAD_HEAD.r, COLOR_QUAD_HEAD.g, COLOR_QUAD_HEAD.b);
     bake_material_into_obj("quad_leg_ros.obj", "quad_leg_ros.mtl",
+                            COLOR_QUAD_LEG.r, COLOR_QUAD_LEG.g, COLOR_QUAD_LEG.b);
+    bake_material_into_obj("quad_shin_ros.obj", "quad_shin_ros.mtl",
                             COLOR_QUAD_LEG.r, COLOR_QUAD_LEG.g, COLOR_QUAD_LEG.b);
 
     write_humanoid_urdf("humanoid.urdf");

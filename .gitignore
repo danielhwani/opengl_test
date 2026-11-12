@@ -1,5 +1,6 @@
 *.exe
 *.o
+*.obj
 __pycache__/
 
 # gen_humanoid_assets.exe로 재생성 가능한 산출물
@@ -10,6 +11,7 @@ leg.obj
 quad_body.obj
 quad_head.obj
 quad_leg.obj
+quad_shin.obj
 humanoid_scene.txt
 body_ros.obj
 head_ros.obj
@@ -19,6 +21,7 @@ leg_ros.obj
 quad_body_ros.obj
 quad_head_ros.obj
 quad_leg_ros.obj
+quad_shin_ros.obj
 body_ros.mtl
 head_ros.mtl
 nose_ros.mtl
@@ -27,6 +30,7 @@ leg_ros.mtl
 quad_body_ros.mtl
 quad_head_ros.mtl
 quad_leg_ros.mtl
+quad_shin_ros.mtl
 humanoid.urdf
 humanoid_extra.yaml
 quadruped.urdf
@@ -36,3 +40,5 @@ quadruped_extra.yaml
 ros2_ws/build/
 ros2_ws/install/
 ros2_ws/log/
+ros2_ws/MUJOCO_LOG.TXT
+ros2_ws/shake_bag*/

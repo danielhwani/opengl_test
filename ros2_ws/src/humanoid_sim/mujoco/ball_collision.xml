@@ -18,10 +18,22 @@
     공(ball)은 그 스프링 없이 순수하게 자유낙하 + 중력 + 충돌 반응만
     한다.
   -->
-  <option gravity="0 0 -9.81" timestep="0.005"/>
+  <!-- integrator="implicitfast": mujoco_ball_sim.py가 가상 스프링
+       (data.xfrc_applied)으로 꽤 뻣뻣한(stiff) 회전 복원력을 걸기
+       때문에, 기본(explicit) 적분 방식으로는 그 뻣뻣함을 못 버티고
+       값이 발산해버렸다(로봇이 "날아가는" 버그) - implicitfast는
+       이런 뻣뻣한 힘에 훨씬 안정적이다. -->
+  <option gravity="0 0 -9.81" timestep="0.005" integrator="implicitfast"/>
+
+  <!-- 조명: quad_walk.xml과 같은 이유로 headlight 기본 밝기를 올리고
+       light를 directional로 바꿨다(기본 원뿔/거리감쇠 때문에 로봇이
+       조명 바로 아래에서 멀어지면 가장자리가 어두웠다). -->
+  <visual>
+    <headlight ambient="0.2 0.2 0.2" diffuse="0.3 0.3 0.3" specular="0.1 0.1 0.1"/>
+  </visual>
 
   <worldbody>
-    <light pos="0 0 5" dir="0 0 -1" diffuse="1 1 1"/>
+    <light pos="0 0 5" dir="0 0 -1" diffuse="1 1 1" directional="true" ambient="0.1 0.1 0.1"/>
     <geom name="ground" type="plane" size="20 20 0.1" rgba="0.42 0.30 0.18 1"/>
 
     <!-- humanoid 몸통 충돌 프록시 - gen_humanoid_assets.c의

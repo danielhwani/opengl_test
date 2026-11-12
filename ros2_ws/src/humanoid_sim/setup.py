@@ -12,9 +12,13 @@ setup(
         ('share/' + package_name + '/launch', [
             'launch/display.launch.py',
             'launch/physics_demo.launch.py',
+            'launch/quad_physics_walk.launch.py',
         ]),
         ('share/' + package_name + '/rviz', ['rviz/humanoid_sim.rviz']),
-        ('share/' + package_name + '/mujoco', ['mujoco/ball_collision.xml']),
+        ('share/' + package_name + '/mujoco', [
+            'mujoco/ball_collision.xml',
+            'mujoco/quad_walk.xml',
+        ]),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -31,6 +35,7 @@ setup(
             'humanoid_state_publisher = humanoid_sim.humanoid_state_publisher:main',
             'quadruped_state_publisher = humanoid_sim.quadruped_state_publisher:main',
             'mujoco_ball_sim = humanoid_sim.mujoco_ball_sim:main',
+            'quad_mujoco_walk = humanoid_sim.quad_mujoco_walk:main',
         ],
     },
 )
