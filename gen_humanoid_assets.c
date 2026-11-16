@@ -346,14 +346,21 @@ static void write_scene(const char *filename) {
     fprintf(f, "QuadHead   quad_head.obj  QuadBody   0.0      %.4f    %.4f  NONE   %.2f  %.2f  %.2f\n",
             QUAD_BODY_H * 0.15, QUAD_BODY_L / 2.0 + QUAD_HEAD_SIZE * 0.45,
             COLOR_QUAD_HEAD.r, COLOR_QUAD_HEAD.g, COLOR_QUAD_HEAD.b);
-    fprintf(f, "QuadLegFL  quad_leg.obj   QuadBody   %.4f     0.0      %.4f  ROTX   %.2f  %.2f  %.2f\n",
-            -QUAD_HIP_X, QUAD_HIP_Z_FRONT, COLOR_QUAD_LEG.r, COLOR_QUAD_LEG.g, COLOR_QUAD_LEG.b);
-    fprintf(f, "QuadLegFR  quad_leg.obj   QuadBody   %.4f     0.0      %.4f  ROTX   %.2f  %.2f  %.2f\n",
-            QUAD_HIP_X, QUAD_HIP_Z_FRONT, COLOR_QUAD_LEG.r, COLOR_QUAD_LEG.g, COLOR_QUAD_LEG.b);
-    fprintf(f, "QuadLegBL  quad_leg.obj   QuadBody   %.4f     0.0      %.4f  ROTX   %.2f  %.2f  %.2f\n",
-            -QUAD_HIP_X, QUAD_HIP_Z_BACK, COLOR_QUAD_LEG.r, COLOR_QUAD_LEG.g, COLOR_QUAD_LEG.b);
-    fprintf(f, "QuadLegBR  quad_leg.obj   QuadBody   %.4f     0.0      %.4f  ROTX   %.2f  %.2f  %.2f\n",
-            QUAD_HIP_X, QUAD_HIP_Z_BACK, COLOR_QUAD_LEG.r, COLOR_QUAD_LEG.g, COLOR_QUAD_LEG.b);
+    /* ty(두번째 열, Y-up이라 수직축)는 원래 리터럴 0.0이었는데, 그러면
+       다리가 QuadBody의 "중심"(상자 메쉬 원점)에 매달려서 몸통 높이의
+       절반(QUAD_BODY_H/2)만큼 로봇 전체가 땅 위로 떠 보이는 버그가
+       있었다 - humanoid의 LeftLeg/RightLeg는 이미 -BODY_H/2를 쓰고
+       있어서(몸통 "바닥"에 다리를 매닮) 비교해서 발견했다. 같은
+       방식으로 -QUAD_BODY_H/2를 줘서 다리가 몸통 바닥에서 매달리게
+       고쳤다. */
+    fprintf(f, "QuadLegFL  quad_leg.obj   QuadBody   %.4f     %.4f     %.4f  ROTX   %.2f  %.2f  %.2f\n",
+            -QUAD_HIP_X, -QUAD_BODY_H / 2.0, QUAD_HIP_Z_FRONT, COLOR_QUAD_LEG.r, COLOR_QUAD_LEG.g, COLOR_QUAD_LEG.b);
+    fprintf(f, "QuadLegFR  quad_leg.obj   QuadBody   %.4f     %.4f     %.4f  ROTX   %.2f  %.2f  %.2f\n",
+            QUAD_HIP_X, -QUAD_BODY_H / 2.0, QUAD_HIP_Z_FRONT, COLOR_QUAD_LEG.r, COLOR_QUAD_LEG.g, COLOR_QUAD_LEG.b);
+    fprintf(f, "QuadLegBL  quad_leg.obj   QuadBody   %.4f     %.4f     %.4f  ROTX   %.2f  %.2f  %.2f\n",
+            -QUAD_HIP_X, -QUAD_BODY_H / 2.0, QUAD_HIP_Z_BACK, COLOR_QUAD_LEG.r, COLOR_QUAD_LEG.g, COLOR_QUAD_LEG.b);
+    fprintf(f, "QuadLegBR  quad_leg.obj   QuadBody   %.4f     %.4f     %.4f  ROTX   %.2f  %.2f  %.2f\n",
+            QUAD_HIP_X, -QUAD_BODY_H / 2.0, QUAD_HIP_Z_BACK, COLOR_QUAD_LEG.r, COLOR_QUAD_LEG.g, COLOR_QUAD_LEG.b);
 
     /* 종아리(무릎 아래) - 부모가 QuadBody가 아니라 각자의 QuadLegXX
        (허벅지)다. 자식의 (tx,ty,tz) 오프셋은 부모의 회전(엉덩이
@@ -591,7 +598,15 @@ static void write_quadruped_urdf(const char *filename) {
             fprintf(f, "  <joint name=\"quadbody_to_%s\" type=\"revolute\">\n", leg_names[i]);
             fprintf(f, "    <parent link=\"QuadBody\"/>\n");
             fprintf(f, "    <child link=\"%s\"/>\n", leg_names[i]);
-            fprintf(f, "    <origin xyz=\"%.4f %.4f 0\" rpy=\"0 0 0\"/>\n", leg_x[i], leg_y[i]);
+            /* z(세번째 값)는 원래 리터럴 0이었는데, humanoid의
+               body_to_leftleg/rightleg가 쓰는 leg_z=-BODY_H/2와
+               달리 QuadBody의 "중심"(상자 메쉬 원점)에 다리를
+               매달아서, base_to_quadbody_z(LEG_LEN+BODY_H/2)와
+               어긋나 로봇 전체가 QUAD_BODY_H/2(0.2m)만큼 땅 위로
+               떠 보이는 버그였다 - humanoid와 똑같이 -QUAD_BODY_H/2를
+               써서 몸통 "바닥"에 다리가 매달리게 고쳤다. */
+            fprintf(f, "    <origin xyz=\"%.4f %.4f %.4f\" rpy=\"0 0 0\"/>\n",
+                    leg_x[i], leg_y[i], -QUAD_BODY_H / 2.0);
             fprintf(f, "    <axis xyz=\"0 1 0\"/>\n");
             fprintf(f, "    <limit lower=\"-%.4f\" upper=\"%.4f\" effort=\"10\" velocity=\"2\"/>\n",
                     QUAD_LEG_JOINT_LIMIT_RAD, QUAD_LEG_JOINT_LIMIT_RAD);

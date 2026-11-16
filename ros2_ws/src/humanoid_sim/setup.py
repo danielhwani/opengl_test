@@ -13,6 +13,7 @@ setup(
             'launch/display.launch.py',
             'launch/physics_demo.launch.py',
             'launch/quad_physics_walk.launch.py',
+            'launch/quad_physics_walk_ball.launch.py',
         ]),
         ('share/' + package_name + '/rviz', ['rviz/humanoid_sim.rviz']),
         ('share/' + package_name + '/mujoco', [
@@ -36,6 +37,8 @@ setup(
             'quadruped_state_publisher = humanoid_sim.quadruped_state_publisher:main',
             'mujoco_ball_sim = humanoid_sim.mujoco_ball_sim:main',
             'quad_mujoco_walk = humanoid_sim.quad_mujoco_walk:main',
+            'quad_mujoco_walk_ball = humanoid_sim.quad_mujoco_walk_ball:main',
+            'teleop_keyboard = humanoid_sim.teleop_keyboard:main',
         ],
     },
 )

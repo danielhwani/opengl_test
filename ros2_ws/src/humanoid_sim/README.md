@@ -263,6 +263,102 @@ deserialize_message`로 sqlite3 `.db3` 파일을 오프라인으로 직접
 재생산되는지) 더 깊이 분석하거나, (c) 지금 수준에서 받아들이고
 다른 작업으로 넘어가는 것 중 선택.
 
+### 해결 (2026-11-16): 네이티브 `mocap`+`weld` 제약으로 재설계 - 리밋 사이클 사라짐
+
+4족 보행에 네이티브 `<position>` 액추에이터를 쓰고 나서(위 "4족
+로봇 실제 관절 구동 보행" 섹션) 그게 `xfrc_applied` 방식보다
+훨씬 안정적이라는 게 분명해졌다 - "직접 만들기 전에 라이브러리
+기본 기능부터 찾아보자"는 교훈을 공 데모에도 적용했다.
+
+**방법**: `ball_collision.xml`에 `mocap="true"` 바디 2개
+(`humanoid_target`/`quad_target`, 물리 영향 없음, 자세만 외부에서
+직접 주입)를 추가하고, `<equality><weld>`로 `humanoid_proxy`/
+`quad_proxy`를 각자의 mocap 목표에 "용접"했다. `mujoco_ball_sim.py`
+는 이제 매 틱 `data.mocap_pos`/`data.mocap_quat`에 TF로 받은 목표
+자세를 그대로 써넣기만 하면 된다 - `apply_spring()`/
+`apply_rotation_spring()`/`check_stuck_and_recover()`와 그 주변의
+모든 상수(`SPRING_KP_POS`, `HUMANOID_KP_ROT`/`QUAD_KP_ROT`,
+`MAX_FORCE`/`MAX_TORQUE`, `*_DRAG`, `*_DAMPING_MULTIPLIER`,
+`STUCK_*`)가 전부 필요 없어져서 삭제했다(과거 버전은 git
+히스토리에 남아있음). `target_vel`을 TF 타임스탬프로 계산하던
+에일리어싱 보정 코드도 통째로 사라졌다 - mocap은 속도가 없는 순수
+kinematic 위치/방향이라 그 자체로 아예 필요 없는 문제였다.
+
+**검증**: ROS 없이 순수 MuJoCo 스크립트로 - (1) 별도 프로토타입
+장면에서 solref 시간상수를 0.02~2.0까지 쓸어보며 다양한 세기로
+공을 쐈고, (2) 실제 `ball_collision.xml`로 공을 `humanoid_proxy`
+위에서 떨어뜨려봤다. **두 경우 모두 단 한 번도 리밋 사이클이나
+발산이 재현되지 않았다** - 맞을 때마다 매번 깨끗하게 감쇠해서
+멈췄다(이전엔 16~20m/s대로 영원히 안 가라앉았던 바로 그 패턴).
+접촉(contact)과 weld 제약이 같은 솔버 스텝에서 함께 풀리는 게
+`xfrc_applied`(명시적 힘, 접촉과 따로 풀림)보다 근본적으로 더
+안정적인 것으로 보인다.
+
+**현재 반응 크기는 다소 작다** - solref 시간상수 0.15로 잡은 상태로,
+20m/s급 충격에도 변위가 수 mm~수 cm 수준이다(너무 뻣뻣해서 안
+그런지, 실제 데모에서 직접 보면서 시간상수를 키워 더 눈에 띄게
+조정할 수 있다 - 값을 올릴수록 더 크게/느리게 흔들린다). 회전
+방향(humanoid 경로 완만 vs quad 급선회)에 따라 kp/damping을 따로
+튜닝해야 했던 것도 이제 필요 없다 - weld 하나가 위치+회전을 한
+제약으로 같이 처리해서 humanoid/quad를 분리할 이유가 없어졌다(둘
+다 같은 `solref="0.15 1"` 공유).
+
+### 추가 업데이트 (2026-11-16): 물리 데모 라이브 테스트에서 발견된 버그 3개
+
+실제로 `physics_demo.launch.py`를 띄워보고 나서 발견/수정한 것들.
+
+**1) 4족 로봇 다리가 무릎 아래로 안 보임 ("날아다니는 것처럼" 보임)**:
+`quadruped_state_publisher.py`(이 데모의 순찰/트롯 애니메이션 담당)가
+무릎 관절(`QuadLegFL_to_QuadShinFL` 등 4개, 다른 세션에서 이미 URDF에
+추가됨)을 `/joint_states`에 전혀 발행하지 않고 있었다 - 한 번도 값을
+못 받은 관절은 robot_state_publisher가 그 아래 링크(정강이)의 TF를
+아예 계산 못 해서 렌더링이 안 된다. 트롯 위상에 맞춰 무릎도 같이
+굽혔다 펴지는 공식(`KNEE_SWING_AMP_DEG * max(0, -cos(phase))`,
+`quad_mujoco_walk.py`와 같은 패턴)을 추가해서 고쳤다.
+
+**2) 다리를 고치고 나니 몸통 전체가 땅 위로 약간 떠 있음**: 원인은
+`gen_humanoid_assets.c`가 4족 로봇의 엉덩이 관절을 `QuadBody`
+메쉬의 "중심"(상자 원점)에 매달고 있었던 것 - humanoid 쪽
+(`body_to_leftleg`/`rightleg`)은 `leg_z = -BODY_H/2`(몸통 "바닥")를
+쓰는데 4족 로봇 쪽만 리터럴 `0`이 박혀 있었다. `base_to_quadbody_z
+= QUAD_LEG_LEN + QUAD_BODY_H/2` 공식 자체는 "엉덩이가 몸통 바닥에
+있다"고 가정하고 있어서, 실제로는 몸통 높이의 절반(`QUAD_BODY_H/2
+= 0.2m`)만큼 어긋나 있었다 - URDF(`write_quadruped_urdf`)와 OpenGL
+씬 파일(`write_scene`) 양쪽 다 같은 버그였다. 양쪽 다
+`-QUAD_BODY_H/2`로 고치고 `gen_humanoid_assets.exe`를 재생성했다.
+(이 버그는 무릎을 추가하기 전부터 있었던 것으로 보이는데, 그때는
+다리 전체가 안 보여서 "발이 땅에 닿는지" 눈으로 확인할 기준점이
+없어 아무도 눈치 못 챘던 것 같다.)
+
+  컴파일러 관련 삽질: `gen_humanoid_assets.c`를 MinGW gcc로 재컴파일할
+  때 `gcc.exe`는 실행되는데(`--version` 정상) 실제 컴파일/링크
+  단계(`cc1.exe` 실행)에서 매번 아무 메시지 없이 exit code 1로
+  죽었다 - `cc1.exe`를 직접 호출해보니 Windows 에러 코드
+  `0xC0000135`(DLL_NOT_FOUND)였다. 원인은 PATH에
+  `ucrt64/bin`이 없어서 `cc1.exe`가 자기 런타임 DLL을 못 찾은
+  것(`gcc.exe` 자신은 같은 폴더에 있어서 괜찮았지만, `cc1.exe`는
+  `lib/gcc/...` 하위 폴더에 있어서 PATH가 필요했다) - PATH에
+  `ucrt64/bin`을 추가하고 나서야 정상적으로 컴파일됐다.
+
+**3) weld 재설계 후 "공에 맞으나 안 맞으나 똑같이 안정적"으로
+보임**: 리밋 사이클은 확실히 없어졌지만, 실제로는 프록시가
+weld로 목표를 따라가면서도 **자기 무게 때문에 항상 거의 동일한
+양만큼 처져 있었다** - 독립 스크립트로 확인하니 처짐 크기가 공
+타격 여부/위치와 무관하게 거의 일정했고(solref 시간상수에
+비례해서 커짐: 0.15->1.1cm, 0.3->4.6cm, 0.5->12.5cm), 진짜 "공에
+맞아서 생기는" 반응은 그 안에 묻혀서 거의 안 보였다. mocap
+애니메이션이 이미 "서 있는" 자세를 책임지므로 프록시가 중력에
+또 처질 필요는 없다는 뜻 - `humanoid_proxy`/`quad_proxy`에
+`gravcomp="1"`을 줘서 이 처짐 자체를 없앴다. (삽질: MuJoCo python
+모델 객체에 런타임으로 `model.body_gravcomp` 배열만 바꿔서는 전혀
+효과가 없었다 - XML 속성(`gravcomp="1"`)으로 컴파일 시점에 줘야
+적용됐다.) 처짐을 없애고 나니 이번엔 순수 충돌 반응 자체가 너무
+작았다(공 0.5kg·2m 자유낙하 운동량이 15kg 프록시엔 mm 단위) - 공
+질량을 3kg로, weld `solref`을 0.15->0.5로 올려서 맞을 때마다
+1~2cm 보이게 흔들리고 다음 낙하(3초) 전에 항상 수 mm 이내로
+복귀하는 걸 독립 스크립트로 20번 연속 무작위 낙하시켜 확인했다
+(누적 드리프트 없음).
+
 ## 4족 로봇 실제 관절 구동 보행 (`quad_physics_walk.launch.py`)
 
 위 두 데모(`display.launch.py`, `physics_demo.launch.py`)는 로봇의
@@ -553,6 +649,130 @@ cmd_linear_x가 음수면 후진한다.
 후진 중에는 회전(angular.z)을 무시한다 - 후진+회전 조합은 아직
 검증 안 했다. 전진→정지→후진→정지 전환도 50초 시나리오로 확인했고,
 전환 순간 충격 없이 매끄러웠다.
+
+## 진짜 물리 4족 로봇에 공 던지기 (`quad_physics_walk_ball.launch.py`)
+
+`mujoco_ball_sim.py`의 공 데모는 mocap+weld로 "항상 제자리로 끌어
+당기는" 장치가 있어서 아무리 세게 맞아도 결국 복귀한다 - 사용자
+표현으로 "약간 꼼수"다. 그럼 꼼수 없이 **진짜 관절 액추에이터로
+걷는** `quad_mujoco_walk.py`/`quad_walk.xml`에 공을 던지면 어떻게
+될지 궁금해서 만들었다.
+
+**먼저 ROS 없이 확인(독립 스크립트)**: 로봇 바로 옆(0.7m)에서 공을
+던져(비행 중 중력으로 처져서 빗나가지 않게 속도에 맞춰 약간의
+수직 보정을 줌) 실제 접촉이 일어나는지(`data.ncon`으로 확인)까지
+검증했다. 결과:
+- 0.5kg/2m/s: 거의 못 느낌, 계속 걸어감
+- 0.43kg(축구공)/5m/s: 맞는 순간 기울기가 18도/피치 16도까지
+  튀었다가 **1초 만에 스스로 원래 걸음 수준(3~4도)으로 회복** -
+  균형 피드백 컨트롤러가 전혀 없는데도(다리는 그냥 정해진 각도
+  패턴을 쫓아갈 뿐) 걸음이 계속되면서 우연히 다시 균형을 잡았다.
+- 2.0kg/6m/s: **그대로 쓰러짐**(0.9초 만에 roll이 180도까지 돌아가
+  옆으로 누움) - 쓰러진 뒤엔 "일어나기" 동작이 없어서 다리만 허공에서
+  계속 트롯 패턴을 반복할 뿐 못 일어난다.
+- 3.0kg/10m/s: 더 빨리(0.5초) 쓰러짐.
+
+mocap+weld 데모와 달리 **"맞으면 항상 복귀"가 전혀 보장되지 않는다**
+- 이게 진짜 물리와 트릭의 핵심 차이다.
+
+**MuJoCo 자체 뷰어로도 확인 가능** (ROS 없이, `mujoco/
+view_quad_walk_ball_throw.py`): `view_quad_walk.py`와 같은 화살표 키
+걷기 조작 + `/`(슬래시) 키를 누를 때마다 위 세기 목록을 순서대로
+하나씩 던진다. 처음엔 Space로 하려 했는데, Space가 MuJoCo 뷰어
+자체의 일시정지 토글과 겹쳐서(커스텀 `key_callback`은 *추가로만*
+전달되고 뷰어 자체 바인딩을 못 막음 - 화살표 키를 쓰는 것과 같은
+이유) 누를 때마다 재생/정지도 같이 토글돼버려 `/`로 바꿨다.
+
+**ROS2/RViz2 버전**: `quad_mujoco_walk_ball.py` + `quad_physics_walk_
+ball.launch.py`. `quad_mujoco_walk.py`의 `compute_leg_targets()`/
+상수를 그대로 import해서 재사용하고(걸음걸이 공식을 또 베끼지
+않음), `quad_walk.xml` 파일 자체는 안 건드리고(다른 데모가 그대로
+쓰므로) 내용을 읽어서 공 바디를 메모리상에서만 끼워 넣어 컴파일한다
+(뷰어 버전과 동일 기법). 공은 URDF가 없으므로 `mujoco_ball_sim.py`와
+같은 방식(MarkerArray, 빨간 구)으로 `physics_markers` 토픽에
+발행한다 - 토픽 이름을 똑같이 맞춰서 기존 `rviz/humanoid_sim.rviz`의
+PhysicsMarkers 디스플레이를 그대로 재사용했다(새 rviz 설정 불필요).
+
+실행:
+```
+ros2 launch humanoid_sim quad_physics_walk_ball.launch.py
+```
+다른 터미널에서 공 던지기(약→강 순서로 순환) - **서비스 호출**이라
+던진 공의 질량/속도가 호출한 바로 그 터미널에 응답으로 찍힌다:
+```
+ros2 service call /quadruped/throw_ball std_srvs/srv/Trigger "{}"
+```
+걷게 하려면(기존 `quad_physics_walk.launch.py`와 동일):
+```
+ros2 topic pub /quadruped/cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.16}, angular: {z: 0.0}}" -r 10
+```
+또는 매번 `ros2 topic pub`을 치기 귀찮으면 아래 `teleop_keyboard` 노드를 쓸 것.
+
+**투척 정보 표시**: 처음엔 터미널 로그(`get_logger().info()`)로만
+질량/속도를 보여줬는데, 사용자가 "RViz 보는 중엔 안 보인다"고
+확인 - 공 바로 위에 `TEXT_VIEW_FACING` 마커(항상 카메라를 보는
+텍스트)로 `0.43kg / 5m/s`처럼 직접 표시하게 바꿨다(`physics_markers`
+토픽에 구 마커와 같이 발행).
+
+**launch 터미널에 로그가 안 찍히는 문제 -> 토픽에서 서비스로 전환**:
+텍스트 마커는 바로 보이는데도 `ros2 launch`를 띄운 터미널엔 "투척:
+질량=..." 로그가 전혀 안 나타난 적이 있었다 - 콜백은 분명 정상
+실행 중인데(마커가 매번 갱신됨) 로그만 안 보였다. 원인은 Windows
+에서 `ros2 launch`가 자식 프로세스의 표준출력을 파이프로 받는데
+(진짜 터미널이 아님), 그러면 C 표준입출력 라이브러리가 자동으로
+라인 버퍼링 대신 풀(블록) 버퍼링으로 전환돼서 - 로그가 바로 안
+나오고 쌓였다가 버퍼가 차거나 프로세스가 끝날 때야(종료 시 flush)
+한꺼번에 나온다. `Node()`에 `emulate_tty=True` +
+`additional_env={"PYTHONUNBUFFERED": "1"}`을 줘봤지만(Windows엔
+POSIX pty가 없어서 emulate_tty 효과가 제한적인 듯) **그래도 여전히
+안 찍혔다**(사용자가 재확인) - 그래서 사용자 제안대로 접근을
+아예 바꿨다: 투척 트리거를 토픽(`std_msgs/Empty`)에서 **서비스**
+(`std_srvs/Trigger`)로 바꾸고, 응답(`success`/`message`)에 질량/
+속도/설명을 담았다. 서비스 호출은 요청-응답이 호출한 프로세스
+안에서 바로 왕복하므로, launch가 띄운 별도 프로세스의 출력 버퍼링
+문제 자체와 완전히 무관해진다 - `ros2 service call`을 실행한 바로
+그 터미널에 응답이 항상 찍힌다. (emulate_tty/PYTHONUNBUFFERED는
+혹시 몰라 남겨뒀다 - 해는 없음.)
+
+**설계 메모 - "누가 던질 공을 결정하는가"(나중에 바꿀 수도 있음)**:
+지금은 `quad_mujoco_walk_ball` 노드(공을 실제로 던지는 쪽)가 질량/
+속도를 **스스로** 결정한다(내부 `THROW_PRESETS`를 순서대로) - 호출자
+(`ros2 service call`)는 "던져"라는 신호만 보내고 어떤 공인지는
+모른다. 그래서 파라미터 없는 `std_srvs/Trigger`로 충분했다.
+
+**반대로 호출자(또는 별도의 "던지는 주체" 노드)가 결정하게 하려면**
+이야기가 달라진다 - `Trigger`로는 안 되고 질량/속도 값을 실어 보낼
+메시지가 필요하다:
+- 가장 간단히: 토픽(`std_msgs/Float32MultiArray`)으로 `[mass, speed]`
+  발행.
+- 더 깔끔하게: `mass`/`speed` 필드가 있는 커스텀 서비스 `.srv`를
+  새로 정의(별도 `_interfaces` 패키지 필요 - 더 번거로움).
+
+이러면 `quad_mujoco_walk_ball`은 "결정자"가 아니라 "실행자"가 되고,
+`THROW_PRESETS`/순환 인덱스 로직은 호출자 쪽(또는 그 역할을 하는
+새 노드)으로 옮겨가야 한다. 장점은 원하는 세기를 정확히 골라
+던질 수 있다는 것, 단점은 지금처럼 반복 호출만으로 약→강 시나리오가
+자동으로 펼쳐지는 편리함이 없어지고 그 시퀀스를 호출자가 직접
+짜야 한다는 것 - 지금은 이 트레이드오프상 현재 구조(노드가 결정)를
+그대로 유지하기로 함.
+
+### 키보드로 cmd_vel 조작 (`teleop_keyboard`)
+
+공식 `teleop_twist_keyboard` 패키지는 이 Windows ROS2 Humble
+설치엔 안 깔려 있다(`ros2 pkg list`로 확인 - apt 바이너리가 없어서
+git 클론+colcon build가 필요함). 그 대신 `view_quad_walk.py` 등과
+조작 체계를 통일한 작은 노드를 직접 만들었다 - Windows 전용
+`msvcrt`로 키 입력을 읽는다(이 프로젝트 ROS2 설치 자체가 Windows
+전용이라 문제없음).
+
+```
+ros2 run humanoid_sim teleop_keyboard
+```
+Up/Down: 전진/후진 속도 증가/감소, Left/Right: 좌/우 회전 증가/감소,
+Enter: 정지, Ctrl+C: 종료. 기본 발행 토픽은 `/quadruped/cmd_vel`
+(`-p topic:=...`로 바꿀 수 있음). cmd_vel 타임아웃(1초) 안에 안
+들어오면 로봇이 멈추는 안전장치가 있어서, 키를 안 눌러도 현재
+속도를 10Hz로 계속 재발행한다.
 
 ## 중요 - Claude가 직접 노드를 띄워 테스트하는 것의 위험성
 

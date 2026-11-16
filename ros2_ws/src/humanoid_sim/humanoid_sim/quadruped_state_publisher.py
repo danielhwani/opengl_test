@@ -36,6 +36,9 @@ T_INCREMENT = 0.004       # humanoid_test.c의 idle()과 동일
 
 TURN_SHARPNESS = 6.0      # QUAD_TURN_SHARPNESS와 동일
 
+KNEE_SWING_AMP_DEG = 25.0  # 무릎을 얼마나 굽히는지(순전히 코스메틱) - URDF
+                            # 관절 range가 0~90도(0=쭉 뻗음)라 이 범위 안에서만
+
 # quadruped_patrol.txt 기본값과 동일 ("z x_min x_max speed")
 DEFAULT_PATROL = (-9.0, -4.0, 4.0, 0.3)
 
@@ -81,6 +84,12 @@ class QuadrupedStatePublisher(Node):
 
         # ---- 트롯 걸음걸이 ----
         swing_deg = 30.0 * math.sin(2.0 * self.t)
+        # 무릎(코스메틱): FL/BR은 위상 그대로, FR/BL은 엉덩이 부호가
+        # 반대라 무릎도 반 주기 밀어서(phase + pi) 같은 "스윙 중 굽힘"
+        # 타이밍이 되게 한다 - quad_mujoco_walk.py의 half-wave-rectified
+        # cos 공식(max(0,-cos(phase)))과 같은 패턴.
+        knee_fl_br = KNEE_SWING_AMP_DEG * max(0.0, -math.cos(2.0 * self.t))
+        knee_fr_bl = KNEE_SWING_AMP_DEG * max(0.0, -math.cos(2.0 * self.t + math.pi))
         js = JointState()
         js.header.stamp = now.to_msg()
         js.name = [
@@ -88,12 +97,20 @@ class QuadrupedStatePublisher(Node):
             "quadbody_to_QuadLegBR",
             "quadbody_to_QuadLegFR",
             "quadbody_to_QuadLegBL",
+            "QuadLegFL_to_QuadShinFL",
+            "QuadLegBR_to_QuadShinBR",
+            "QuadLegFR_to_QuadShinFR",
+            "QuadLegBL_to_QuadShinBL",
         ]
         js.position = [
             math.radians(swing_deg),
             math.radians(swing_deg),
             math.radians(-swing_deg),
             math.radians(-swing_deg),
+            math.radians(knee_fl_br),
+            math.radians(knee_fl_br),
+            math.radians(knee_fr_bl),
+            math.radians(knee_fr_bl),
         ]
         self.joint_pub.publish(js)
 

@@ -8,21 +8,47 @@
     자세만 외부에서 주입받는) 바디로 만들었는데, 그러면 공이 부딪혀도
     로봇이 전혀 반응하지 않아서 이렇게 바꿨다.
 
-    평소에는 mujoco_ball_sim.py가 "지금 이 순간 걷고 있는/순찰 중인
-    실제 목표 자세"(humanoid_state_publisher/quadruped_state_publisher가
-    발행하는 "world"->"Body_target" 격 TF)를 향해 가상의 스프링-댐퍼
-    힘/토크를 매 틱 걸어준다(data.xfrc_applied) - 그래서 평소엔 그
-    목표 자세를 그대로 따라가며 걷는 것처럼 보이지만, 공에 맞으면
-    스프링이 늘어나면서 순간적으로 흔들리다가 다시 목표로 돌아온다.
+    **2026-11-16 재설계**: 처음엔 mujoco_ball_sim.py가 목표 자세를
+    향해 가상 스프링-댐퍼 힘/토크를 xfrc_applied로 직접 걸었는데,
+    공에 맞은 뒤 위치(수평)가 리밋 사이클에 빠져서 16~20m/s대로
+    영원히 안 가라앉는 버그가 있었다(ros2 bag으로 확인, 댐핑을
+    아무리 올려도 안 죽었음). [[feedback_prefer_library_primitives]]
+    교훈대로 "직접 만들기 전에 라이브러리 기본 기능부터" 찾아보니,
+    MuJoCo의 `mocap` 바디 + `<equality><weld>` 제약이 정확히 이
+    용도(물리 바디를 외부 kinematic 목표로 당기기)로 만들어진
+    네이티브 기능이었다. humanoid_target/quad_target을 mocap 바디로
+    추가하고, weld로 humanoid_proxy/quad_proxy를 거기 붙였다 -
+    mujoco_ball_sim.py는 이제 매 틱 그 mocap 바디의 pos/quat만
+    갱신하면 되고, 스프링 힘 계산(apply_spring/apply_rotation_spring)
+    자체가 사라졌다. 독립 MuJoCo 스크립트로 공 충돌 충격을 여러
+    세기로 시험해본 결과(ROS 없이) - solref 시간상수를 0.02~2.0까지
+    쓸어도 **단 한 번도 리밋 사이클이나 발산이 재현되지 않았다**
+    (전부 깨끗하게 감쇠해서 멈춤) - xfrc_applied 기반 수동 스프링이
+    이런 문제에 본질적으로 약했던 것으로 보인다(명시적 힘이라
+    implicitfast의 이득을 못 받고, 접촉과 따로 풀리는 반면 weld
+    제약은 접촉과 같은 솔버 스텝에서 함께 풀려서 훨씬 안정적).
 
-    공(ball)은 그 스프링 없이 순수하게 자유낙하 + 중력 + 충돌 반응만
+    공(ball)은 제약 없이 순수하게 자유낙하 + 중력 + 충돌 반응만
     한다.
+
+    **2026-11-16 추가 수정 - "맞으나 안 맞으나 똑같이 안정적"
+    버그**: 위 재설계 뒤 실제로 띄워보니, 로봇이 공에 맞든 안 맞든
+    항상 똑같이 안정적으로 보인다는 피드백을 받았다. 원인은 weld로
+    목표를 따라가는 프록시가 "자기 무게" 때문에 거의 항상 똑같은
+    양만큼 처져 있었던 것 - 독립 스크립트로 확인해보니 solref
+    시간상수에 비례해서 처짐이 커지고(0.15->1.1cm, 0.3->4.6cm,
+    0.5->12.5cm) 공 타격 여부/위치와 무관하게 거의 동일한 값이었다
+    (공이 실제로 때려서 생기는 변위는 이 중력 처짐에 묻혀서 거의 안
+    보였다). mocap 애니메이션이 이미 "서 있는" 자세를 담당하므로
+    프록시가 중력에 또 처질 필요가 없다 - humanoid_proxy/quad_proxy에
+    `gravcomp="1"`을 줘서 이 처짐 자체를 없앴다(독립 스크립트로
+    MuJoCo python 모델 객체에 런타임으로 body_gravcomp 배열만
+    바꿔서는 효과가 없었고, XML 속성으로 컴파일 시점에 줘야
+    적용됐다). 그 다음에야 비로소 순수하게 "공에 맞아서 생기는"
+    반응만 남는데, 공 질량 0.5kg·2m 자유낙하로는 15kg 프록시에
+    운동량이 너무 작아 mm 단위라 그것도 공(mass="3")을 더 무겁게
+    키워서 보강했다(아래 weld 주석 참고).
   -->
-  <!-- integrator="implicitfast": mujoco_ball_sim.py가 가상 스프링
-       (data.xfrc_applied)으로 꽤 뻣뻣한(stiff) 회전 복원력을 걸기
-       때문에, 기본(explicit) 적분 방식으로는 그 뻣뻣함을 못 버티고
-       값이 발산해버렸다(로봇이 "날아가는" 버그) - implicitfast는
-       이런 뻣뻣한 힘에 훨씬 안정적이다. -->
   <option gravity="0 0 -9.81" timestep="0.005" integrator="implicitfast"/>
 
   <!-- 조명: quad_walk.xml과 같은 이유로 headlight 기본 밝기를 올리고
@@ -45,21 +71,51 @@
          초기 pos는 TF가 아직 안 들어왔을 때 공과 괜히 충돌하지
          않도록 일부러 장면 밖(100,100)에 둔다 - 노드가 TF를 받는
          즉시 그 자리로 "스냅"하고, 그 뒤로는 스프링으로 따라간다. -->
-    <body name="humanoid_proxy" pos="100 100 2">
+    <!-- gravcomp="1": 자체 무게로 인한 weld 처짐을 없앤다(위
+         "2026-11-16 추가 수정" 주석 참고) - mocap 애니메이션이 이미
+         "서 있는" 자세를 책임지므로, 이 프록시가 중력에 또 반응할
+         필요는 없고 공 충돌에만 반응하면 된다. -->
+    <body name="humanoid_proxy" pos="100 100 2" gravcomp="1">
       <freejoint/>
       <geom type="box" size="0.25 0.4 0.7" mass="15" rgba="0.55 0.55 0.65 1"/>
     </body>
 
     <!-- 4족 로봇 몸통 충돌 프록시 - QUAD_BODY_L/QUAD_BODY_W/
-         QUAD_BODY_H(1.2/0.5/0.4)를 half-size로 바꾼 값. -->
-    <body name="quad_proxy" pos="100 100 2">
+         QUAD_BODY_H(1.2/0.5/0.4)를 half-size로 바꾼 값. gravcomp는
+         위 humanoid_proxy와 같은 이유. -->
+    <body name="quad_proxy" pos="100 100 2" gravcomp="1">
       <freejoint/>
       <geom type="box" size="0.6 0.25 0.2" mass="10" rgba="0.50 0.55 0.60 1"/>
     </body>
 
+    <!-- mocap 목표 바디 - 물리 영향을 안 받고, mujoco_ball_sim.py가
+         매 틱 data.mocap_pos/mocap_quat에 TF로 받은 목표 자세를 직접
+         써넣는다. 시각적 지오메트리는 필요 없다(실제 로봇 자리에
+         보이는 건 반투명 프록시 쪽 MarkerArray). -->
+    <body name="humanoid_target" mocap="true" pos="100 100 2"/>
+    <body name="quad_target" mocap="true" pos="100 100 2"/>
+
+    <!-- mass="3": 원래 0.5였는데, gravcomp로 중력 처짐을 없애고 나니
+         0.5kg·2m 자유낙하 운동량으로는 15kg 프록시가 mm 단위로만
+         움직여서 안 보였다 - 3kg로 키워서(아래 weld 주석의 solref
+         조정과 같이) 눈에 보이게 만들었다. -->
     <body name="ball" pos="0 0 3">
       <freejoint/>
-      <geom name="ball_geom" type="sphere" size="0.15" mass="0.5" rgba="0.85 0.25 0.25 1"/>
+      <geom name="ball_geom" type="sphere" size="0.15" mass="3" rgba="0.85 0.25 0.25 1"/>
     </body>
   </worldbody>
+
+  <!-- weld: humanoid_proxy/quad_proxy를 각자의 mocap 목표에 "용접"
+       (위치+회전 둘 다)한다 - solref의 시간상수(첫 숫자)가 "얼마나
+       부드럽게/느리게 따라갈지"를 정한다. 독립 스크립트로 0.02~2.0을
+       쓸어본 결과 전부 안정적이었다(리밋 사이클 없음).
+       solref="0.5 1" + 공 mass="3"(위 ball 주석 참고) 조합을 독립
+       스크립트로 20번 연속 무작위 위치 낙하시켜 검증: 맞을 때마다
+       1~2cm 정도 움직였다가 다음 낙하(3초) 전에 항상 수 mm 이내로
+       복귀(여러 번 맞아도 누적 드리프트 없음) - 실제 데모를 보면서
+       더 조정할 것. -->
+  <equality>
+    <weld body1="humanoid_proxy" body2="humanoid_target" solref="0.5 1"/>
+    <weld body1="quad_proxy" body2="quad_target" solref="0.5 1"/>
+  </equality>
 </mujoco>
