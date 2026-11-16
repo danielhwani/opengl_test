@@ -76,15 +76,24 @@ def clamp(x, lo, hi):
 
 
 def compute_leg_targets(t, cmd_linear_x, cmd_angular_z):
-    """quad_mujoco_walk.py의 같은 이름 함수와 동일한 매핑 - 그쪽 주석에
-    설계 이유가 다 적혀 있다. 여기서 바꾸면 거기도 똑같이 바꿀 것."""
-    speed_frac = clamp(cmd_linear_x / CMD_MAX_SPEED_MPS, 0.0, 1.0)
-    turn_frac = clamp(cmd_angular_z / CMD_MAX_TURN_RATE_RAD_S, -1.0, 1.0)
-    turn_diff_deg = turn_frac * CMD_MAX_TURN_DIFF_DEG
+    """quad_mujoco_walk.py의 같은 이름 함수와 동일한 매핑(후진 포함) -
+    그쪽 주석에 설계 이유가 다 적혀 있다. 여기서 바꾸면 거기도 똑같이
+    바꿀 것."""
+    going_backward = cmd_linear_x < 0.0
+    speed_frac = clamp(abs(cmd_linear_x) / CMD_MAX_SPEED_MPS, 0.0, 1.0)
 
-    amp_span = CMD_BASE_AMP_AT_ZERO_TURN_DEG - CMD_BASE_AMP_AT_MAX_TURN_DEG
-    base_amp_deg = (CMD_BASE_AMP_AT_ZERO_TURN_DEG - amp_span * abs(turn_frac)) * speed_frac
+    if going_backward:
+        turn_diff_deg = 0.0
+        base_amp_deg = CMD_BASE_AMP_AT_ZERO_TURN_DEG * speed_frac
+    else:
+        turn_frac = clamp(cmd_angular_z / CMD_MAX_TURN_RATE_RAD_S, -1.0, 1.0)
+        turn_diff_deg = turn_frac * CMD_MAX_TURN_DIFF_DEG
+        amp_span = CMD_BASE_AMP_AT_ZERO_TURN_DEG - CMD_BASE_AMP_AT_MAX_TURN_DEG
+        base_amp_deg = (CMD_BASE_AMP_AT_ZERO_TURN_DEG - amp_span * abs(turn_frac)) * speed_frac
     knee_amp_deg = KNEE_AMPLITUDE_DEG * speed_frac
+
+    direction_sign = -1.0 if going_backward else 1.0
+    knee_shift = (math.pi / 2.0) if going_backward else 0.0
 
     base_phase = 2.0 * math.pi * GAIT_FREQ_HZ * t
     hip_rad = {}
@@ -92,9 +101,9 @@ def compute_leg_targets(t, cmd_linear_x, cmd_angular_z):
     for leg in LEGS:
         side_sign = 1.0 if leg in ("FR", "BR") else -1.0
         amp_deg = base_amp_deg + side_sign * turn_diff_deg
-        hip_rad[leg] = HIP_SIGN[leg] * math.radians(amp_deg) * math.sin(base_phase)
+        hip_rad[leg] = direction_sign * HIP_SIGN[leg] * math.radians(amp_deg) * math.sin(base_phase)
 
-        knee_phase = base_phase + KNEE_PHASE_OFFSET[leg]
+        knee_phase = base_phase + KNEE_PHASE_OFFSET[leg] + knee_shift
         knee_rad[leg] = max(0.0, -math.cos(knee_phase)) * math.radians(knee_amp_deg)
     return hip_rad, knee_rad
 
@@ -117,9 +126,9 @@ def main():
 
     def key_callback(keycode):
         if keycode == KEY_UP:
-            cmd["linear_x"] = clamp(cmd["linear_x"] + LINEAR_STEP_MPS, 0.0, CMD_MAX_SPEED_MPS)
+            cmd["linear_x"] = clamp(cmd["linear_x"] + LINEAR_STEP_MPS, -CMD_MAX_SPEED_MPS, CMD_MAX_SPEED_MPS)
         elif keycode == KEY_DOWN:
-            cmd["linear_x"] = clamp(cmd["linear_x"] - LINEAR_STEP_MPS, 0.0, CMD_MAX_SPEED_MPS)
+            cmd["linear_x"] = clamp(cmd["linear_x"] - LINEAR_STEP_MPS, -CMD_MAX_SPEED_MPS, CMD_MAX_SPEED_MPS)
         elif keycode == KEY_LEFT:
             cmd["angular_z"] = clamp(cmd["angular_z"] + ANGULAR_STEP_RAD_S,
                                       -CMD_MAX_TURN_RATE_RAD_S, CMD_MAX_TURN_RATE_RAD_S)
@@ -133,7 +142,8 @@ def main():
             return
         print(f"cmd_vel: linear_x={cmd['linear_x']:.3f} m/s  angular_z={cmd['angular_z']:.4f} rad/s")
 
-    print("Up/Down: 전진 속도 증가/감소, Left/Right: 좌/우 회전 증가/감소, Enter: 정지")
+    print("Up/Down: 전진/후진 속도 증가/감소(Down을 계속 누르면 후진), "
+          "Left/Right: 좌/우 회전 증가/감소(후진 중엔 무시됨), Enter: 정지")
 
     with mujoco.viewer.launch_passive(model, data, key_callback=key_callback) as viewer:
         while viewer.is_running():

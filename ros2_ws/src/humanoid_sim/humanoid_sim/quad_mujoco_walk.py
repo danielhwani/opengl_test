@@ -79,6 +79,23 @@ ROS 없이 mj_step만 반복하는 스크립트로 먼저 검증했다(README의
 속도 자체가 매우 느리다(최대 설정으로도 초당 1도 안팎) - 더 빠른
 회전을 원하면 엉덩이에 두 번째(요) 관절을 추가하는 게 다음 단계일
 것이다(무릎을 추가했던 것과 같은 패턴).
+
+**더 빠른 회전 시도 2건 - 둘 다 포기, README에 상세 기록**: (1) 좌우
+보폭 차이를 3도 넘게 키워봤는데 회전량이 비례하지 않고 방향이
+뒤집히거나 넘어지는 카오스적 구간이었다. (2) 엉덩이에 실제 요
+관절을 추가해(독립 MJCF 프로토타입만, 이 파일/실제 프로젝트는 안
+건드림) 검증했는데 회전 명령이 전혀 없어도(그냥 직진) PD 게인을
+5~2000까지 바꿔봐도 2~3초 안에 불안정해졌다 - 발이 마찰로 땅에
+박힌 동안 가벼운 다리 자체가 그 축으로 제멋대로 돌아가는 구조적
+문제로 보여서 포기하고 지금의 느린 방식을 최종으로 유지한다.
+
+**2026-11-16 추가 업데이트: 후진도 가능.** cmd_linear_x가 음수면
+후진 - 엉덩이 보폭 부호만 뒤집는 걸로는 거의 제자리걸음만 됐고
+(무릎 타이밍이 안 맞아서 추진력이 상쇄됨), 엉덩이를 뒤집고 무릎
+위상에 **+90도**를 더해야 깨끗한 후진이 나왔다(180초에 -43.5m,
+전진과 비슷한 크기로 안정적 - 자세한 수치/다른 각도 시도 결과는
+compute_leg_targets()의 docstring 참고). 후진 중에는 회전을 무시
+한다(후진+회전 조합은 아직 검증 안 함).
 """
 
 import math
@@ -172,14 +189,38 @@ def clamp(x, lo, hi):
 def compute_leg_targets(t, cmd_linear_x, cmd_angular_z):
     """현재 시뮬레이션 시간 t와 명령 속도로 다리마다 (엉덩이각, 무릎각)
     라디안을 계산한다. quad_mujoco_walk.py/view_quad_walk.py가
-    공통으로 쓰는 매핑(둘 다 같은 값을 써야 동작이 똑같이 보인다)."""
-    speed_frac = clamp(cmd_linear_x / CMD_MAX_SPEED_MPS, 0.0, 1.0)
-    turn_frac = clamp(cmd_angular_z / CMD_MAX_TURN_RATE_RAD_S, -1.0, 1.0)
-    turn_diff_deg = turn_frac * CMD_MAX_TURN_DIFF_DEG
+    공통으로 쓰는 매핑(둘 다 같은 값을 써야 동작이 똑같이 보인다).
 
-    amp_span = CMD_BASE_AMP_AT_ZERO_TURN_DEG - CMD_BASE_AMP_AT_MAX_TURN_DEG
-    base_amp_deg = (CMD_BASE_AMP_AT_ZERO_TURN_DEG - amp_span * abs(turn_frac)) * speed_frac
+    **후진(2026-11-16)**: cmd_linear_x가 음수면 후진. 단순히 엉덩이
+    진폭 부호만 뒤집으면(무릎 타이밍은 그대로) 거의 제자리걸음만
+    됐다(ROS 없이 mj_step로 검증, 90초에 -0.37m) - 무릎이 "스탠스
+    (발로 바닥을 밀어 몸통을 전진시키는 구간)"에 맞게 타이밍이 맞춰져
+    있어서, 엉덩이만 뒤집으면 무릎이 반대로(스윙 때 펴지고 스탠스
+    때 굽혀서) 움직여 추진력이 상쇄됐다. 엉덩이 부호를 뒤집고 무릎
+    위상에 **+90도(π/2)**를 더하니(단순 부호반전(180도)이 아니라
+    진짜 위상 이동) 깨끗한 후진이 나왔다(180초에 -43.5m, 기울기
+    5도대, 전진과 거의 같은 크기로 안정적) - -60/-90/120/150도 등
+    여러 이동값을 쓸어서 90도가 가장 깨끗했다(부호반전=180도 자체는
+    다시 "제자리" 패턴이 나와서 직관과 다름 - 무릎의 max(0,...)
+    클리핑 때문에 사인파처럼 단순히 반대칭이 아니다).
+    후진 중에는 회전(angular.z)을 무시한다 - 후진+회전 조합은 아직
+    검증 안 함.
+    """
+    going_backward = cmd_linear_x < 0.0
+    speed_frac = clamp(abs(cmd_linear_x) / CMD_MAX_SPEED_MPS, 0.0, 1.0)
+
+    if going_backward:
+        turn_diff_deg = 0.0
+        base_amp_deg = CMD_BASE_AMP_AT_ZERO_TURN_DEG * speed_frac
+    else:
+        turn_frac = clamp(cmd_angular_z / CMD_MAX_TURN_RATE_RAD_S, -1.0, 1.0)
+        turn_diff_deg = turn_frac * CMD_MAX_TURN_DIFF_DEG
+        amp_span = CMD_BASE_AMP_AT_ZERO_TURN_DEG - CMD_BASE_AMP_AT_MAX_TURN_DEG
+        base_amp_deg = (CMD_BASE_AMP_AT_ZERO_TURN_DEG - amp_span * abs(turn_frac)) * speed_frac
     knee_amp_deg = KNEE_AMPLITUDE_DEG * speed_frac
+
+    direction_sign = -1.0 if going_backward else 1.0
+    knee_shift = (math.pi / 2.0) if going_backward else 0.0
 
     base_phase = 2.0 * math.pi * GAIT_FREQ_HZ * t
     hip_rad = {}
@@ -190,9 +231,9 @@ def compute_leg_targets(t, cmd_linear_x, cmd_angular_z):
         # 같은 방향)으로 돈다(독립 검증으로 부호 확인함).
         side_sign = 1.0 if leg in ("FR", "BR") else -1.0
         amp_deg = base_amp_deg + side_sign * turn_diff_deg
-        hip_rad[leg] = HIP_SIGN[leg] * math.radians(amp_deg) * math.sin(base_phase)
+        hip_rad[leg] = direction_sign * HIP_SIGN[leg] * math.radians(amp_deg) * math.sin(base_phase)
 
-        knee_phase = base_phase + KNEE_PHASE_OFFSET[leg]
+        knee_phase = base_phase + KNEE_PHASE_OFFSET[leg] + knee_shift
         knee_rad[leg] = max(0.0, -math.cos(knee_phase)) * math.radians(knee_amp_deg)
     return hip_rad, knee_rad
 
