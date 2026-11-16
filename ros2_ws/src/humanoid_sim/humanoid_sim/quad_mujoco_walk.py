@@ -64,6 +64,21 @@ quadruped_state_publisher.py가 발행하던 자리를 대신하므로, 이
 
 좌표계: quad_walk.xml은 quadruped.urdf와 똑같이 ROS 좌표계(X=앞,
 Y=왼쪽, Z=위)를 그대로 쓴다 - 별도 축 변환이 필요 없다.
+
+**2026-11-16 업데이트: /cmd_vel(geometry_msgs/Twist)로 방향 조정.**
+linear.x(전진 속도)와 angular.z(회전 속도)를 받아서 걸음걸이를
+실시간으로 바꾼다 - "엉덩이 보폭을 좌우 다리에 다르게 주면 도는지"를
+ROS 없이 mj_step만 반복하는 스크립트로 먼저 검증했다(README의
+"cmd_vel 방향 조정" 섹션에 전체 과정 기록). 핵심 발견: 이 매핑은
+**선형이 아니라 꽤 예민/비선형(카오스적)**이다 - 기존 직진 보폭
+32도에 회전 차이 3도만 더해도 역주행(뒤로 감)이 나올 정도로
+불안정했다. 그래서 회전을 많이 줄수록 전진 보폭을 32도에서 25도
+쪽으로 같이 낮추는 보정을 넣었다(아래 BASE_AMP_* 상수) - 이 조합
+(32/0, 28.5/1.5, 25/3도)만 90초씩 따로 검증했다. 또한 다리 엉덩이
+관절에 요(yaw)/벌림(ab-duction) 축이 없어서(피치 1축뿐) 회전
+속도 자체가 매우 느리다(최대 설정으로도 초당 1도 안팎) - 더 빠른
+회전을 원하면 엉덩이에 두 번째(요) 관절을 추가하는 게 다음 단계일
+것이다(무릎을 추가했던 것과 같은 패턴).
 """
 
 import math
@@ -74,7 +89,7 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
-from geometry_msgs.msg import TransformStamped
+from geometry_msgs.msg import TransformStamped, Twist
 from tf2_ros import TransformBroadcaster
 from ament_index_python.packages import get_package_share_directory
 
@@ -122,6 +137,64 @@ KNEE_AMPLITUDE_DEG = 15.0   # 무릎이 굽혀지는 최대 각도(0=쭉 뻗음)
                              # 16도부터 급격히 불안정, 17도부터 넘어짐
                              # (위 독립 검증 결과 참고) - 15도가 한계
                              # 바로 아래의 안전한 값.
+
+# ---- /cmd_vel 매핑 상수 (2026-11-16, 독립 MuJoCo 스크립트로 검증) ----
+# cmd_linear_x(m/s)가 이 값 이상이면 "최고 속도"(직진 시 보폭 32도)로
+# 간주 - SWING_AMPLITUDE_DEG=32도일 때 300초 동안 48.3m 간 실측값
+# (48.3/300)에서 가져옴.
+CMD_MAX_SPEED_MPS = 0.16
+# cmd_angular_z(rad/s)가 이 값 이상이면 "최대 회전"으로 간주 - 아래
+# MAX_TURN_DIFF_DEG(좌우 보폭 차이 3도)를 90초 동안 줬을 때 실측 회전
+# 약 0.8도/초(75.2도/90초) 기준.
+CMD_MAX_TURN_RATE_RAD_S = 0.015
+# 좌우 다리 보폭 차이의 최대값(도) - 회전을 만드는 방법. 90초 검증으로
+# 0~3도는 깨끗하게(회전량이 차이값에 거의 비례, 안 넘어짐) 늘었지만
+# 4.5도부터 회전력을 잃고 6도에서는 넘어졌다 - 3도를 한계로 잡았다.
+CMD_MAX_TURN_DIFF_DEG = 3.0
+# 회전이 전혀 없을 때(직진) 쓰는 최대 보폭 - 기존 SWING_AMPLITUDE_DEG와
+# 같음.
+CMD_BASE_AMP_AT_ZERO_TURN_DEG = SWING_AMPLITUDE_DEG
+# 최대 회전일 때 쓰는 보폭 - **32도(직진용 최대 보폭) 그대로에 회전
+# 차이 3도를 더하면 역주행까지 나올 만큼 불안정했다**(90초 검증,
+# fwd=-1.4m). 25도로 낮춘 상태에서 3도 차이를 주니 안정적이고
+# 방향도 한쪽으로 일관됐다(90초에 75.2도 회전, 안 넘어짐) - 그래서
+# 회전이 커질수록 보폭을 32->25도 쪽으로 같이 낮춘다(선형 보간).
+CMD_BASE_AMP_AT_MAX_TURN_DEG = 25.0
+# /cmd_vel을 이 시간(초) 이상 못 받으면 멈춘 것으로 간주 - teleop
+# 연결이 끊겼는데 로봇이 계속 걷는 걸 막는 안전장치.
+CMD_VEL_TIMEOUT_SEC = 1.0
+
+
+def clamp(x, lo, hi):
+    return max(lo, min(hi, x))
+
+
+def compute_leg_targets(t, cmd_linear_x, cmd_angular_z):
+    """현재 시뮬레이션 시간 t와 명령 속도로 다리마다 (엉덩이각, 무릎각)
+    라디안을 계산한다. quad_mujoco_walk.py/view_quad_walk.py가
+    공통으로 쓰는 매핑(둘 다 같은 값을 써야 동작이 똑같이 보인다)."""
+    speed_frac = clamp(cmd_linear_x / CMD_MAX_SPEED_MPS, 0.0, 1.0)
+    turn_frac = clamp(cmd_angular_z / CMD_MAX_TURN_RATE_RAD_S, -1.0, 1.0)
+    turn_diff_deg = turn_frac * CMD_MAX_TURN_DIFF_DEG
+
+    amp_span = CMD_BASE_AMP_AT_ZERO_TURN_DEG - CMD_BASE_AMP_AT_MAX_TURN_DEG
+    base_amp_deg = (CMD_BASE_AMP_AT_ZERO_TURN_DEG - amp_span * abs(turn_frac)) * speed_frac
+    knee_amp_deg = KNEE_AMPLITUDE_DEG * speed_frac
+
+    base_phase = 2.0 * math.pi * GAIT_FREQ_HZ * t
+    hip_rad = {}
+    knee_rad = {}
+    for leg in LEGS:
+        # 오른쪽(FR,BR)은 +turn_diff, 왼쪽(FL,BL)은 -turn_diff - 오른쪽
+        # 보폭이 커지면 로봇이 왼쪽(반시계, ROS에서 angular.z>0과
+        # 같은 방향)으로 돈다(독립 검증으로 부호 확인함).
+        side_sign = 1.0 if leg in ("FR", "BR") else -1.0
+        amp_deg = base_amp_deg + side_sign * turn_diff_deg
+        hip_rad[leg] = HIP_SIGN[leg] * math.radians(amp_deg) * math.sin(base_phase)
+
+        knee_phase = base_phase + KNEE_PHASE_OFFSET[leg]
+        knee_rad[leg] = max(0.0, -math.cos(knee_phase)) * math.radians(knee_amp_deg)
+    return hip_rad, knee_rad
 
 # QUAD_LEG_LEN(0.55) + QUAD_BODY_H/2(0.2) - quad_walk.xml의 몸통 시작
 # 높이, quadruped.urdf의 base_to_body_z와 동일.
@@ -207,24 +280,35 @@ class QuadMujocoWalk(Node):
 
         self.joint_pub = self.create_publisher(JointState, "joint_states", 10)
         self.tf_broadcaster = TransformBroadcaster(self)
+
+        self.cmd_linear_x = 0.0
+        self.cmd_angular_z = 0.0
+        self.last_cmd_time = self.get_clock().now()
+        self.cmd_vel_sub = self.create_subscription(Twist, "cmd_vel", self.on_cmd_vel, 10)
+
         self.timer = self.create_timer(TIMER_PERIOD_SEC, self.on_timer)
         self.get_logger().info(f"MuJoCo 모델 로드: {mjcf_path}")
 
-    def on_timer(self):
-        # ---- 트롯 걸음걸이 (대각선 다리 쌍 반대 위상은
-        # quadruped_state_publisher.py와 동일한 패턴 - 주파수/진폭/무릎
-        # 공식은 독립 검증으로 찾은 값, 위 GAIT_FREQ_HZ/KNEE_AMPLITUDE_DEG
-        # 주석 참고). 무릎은 "자기 다리가 스윙하는 동안만" 굽히고
-        # (max(0, -cos(.)) - 음수가 안 나오게), 스탠스(바닥을 미는
-        # 구간)에는 0(쭉 뻗음)으로 돌아간다. ----
-        base_phase = 2.0 * math.pi * GAIT_FREQ_HZ * self.data.time
-        for leg in LEGS:
-            hip_rad = HIP_SIGN[leg] * math.radians(SWING_AMPLITUDE_DEG) * math.sin(base_phase)
-            self.data.ctrl[self.hip_actuator_id[leg]] = hip_rad
+    def on_cmd_vel(self, msg):
+        self.cmd_linear_x = msg.linear.x
+        self.cmd_angular_z = msg.angular.z
+        self.last_cmd_time = self.get_clock().now()
 
-            knee_phase = base_phase + KNEE_PHASE_OFFSET[leg]
-            knee_rad = max(0.0, -math.cos(knee_phase)) * math.radians(KNEE_AMPLITUDE_DEG)
-            self.data.ctrl[self.knee_actuator_id[leg]] = knee_rad
+    def on_timer(self):
+        # ---- 트롯 걸음걸이. 엉덩이/무릎 각도는 compute_leg_targets()가
+        # /cmd_vel 명령(linear.x=전진 속도, angular.z=회전 속도)으로
+        # 계산한다 - CMD_VEL_TIMEOUT_SEC 넘게 명령이 없으면 정지(0,0)로
+        # 간주해서, teleop 연결이 끊겨도 로봇이 계속 걷지 않게 한다. ----
+        age_sec = (self.get_clock().now() - self.last_cmd_time).nanoseconds * 1e-9
+        if age_sec > CMD_VEL_TIMEOUT_SEC:
+            linear_x, angular_z = 0.0, 0.0
+        else:
+            linear_x, angular_z = self.cmd_linear_x, self.cmd_angular_z
+
+        hip_rad, knee_rad = compute_leg_targets(self.data.time, linear_x, angular_z)
+        for leg in LEGS:
+            self.data.ctrl[self.hip_actuator_id[leg]] = hip_rad[leg]
+            self.data.ctrl[self.knee_actuator_id[leg]] = knee_rad[leg]
 
         for _ in range(PHYSICS_SUBSTEPS):
             mujoco.mj_step(self.model, self.data)
