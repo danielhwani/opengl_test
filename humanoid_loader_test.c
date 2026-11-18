@@ -172,6 +172,8 @@ static double left_angle = 0.0;
 static double right_angle = 0.0;
 static double left_leg_angle = 0.0;
 static double right_leg_angle = 0.0;
+static double left_knee_angle = 0.0;
+static double right_knee_angle = 0.0;
 /* 몸통 전체의 월드 위치/방향 - humanoid_test.c와 동일하게, 트리 전체
    (ROOT)에 적용되는 변환이라 다른 모든 부위를 다 끌고 다닌다. */
 static double body_x = 0.0;
@@ -428,6 +430,7 @@ static GLuint texture_for_part(const char *name) {
     if (strcmp(name, "Body") == 0) return shirt_texture_id;
     if (strcmp(name, "LeftArm") == 0 || strcmp(name, "RightArm") == 0) return shirt_texture_id;
     if (strcmp(name, "LeftLeg") == 0 || strcmp(name, "RightLeg") == 0) return pants_texture_id;
+    if (strcmp(name, "LeftShin") == 0 || strcmp(name, "RightShin") == 0) return pants_texture_id;
     return 0;
 }
 
@@ -436,6 +439,8 @@ static double angle_for_part(const char *name) {
     if (strcmp(name, "RightArm") == 0) return right_angle;
     if (strcmp(name, "LeftLeg") == 0) return left_leg_angle;
     if (strcmp(name, "RightLeg") == 0) return right_leg_angle;
+    if (strcmp(name, "LeftShin") == 0) return left_knee_angle;
+    if (strcmp(name, "RightShin") == 0) return right_knee_angle;
     if (strcmp(name, "QuadLegFL") == 0) return quad_fl_angle;
     if (strcmp(name, "QuadLegFR") == 0) return quad_fr_angle;
     if (strcmp(name, "QuadLegBL") == 0) return quad_bl_angle;
@@ -911,6 +916,17 @@ static void idle(void) {
         right_angle = -35.0 * sin(t);
         left_leg_angle = -25.0 * sin(t);
         right_leg_angle = 25.0 * sin(t);
+
+        /* 무릎(코스메틱) - humanoid_test.c와 동일한 공식/진폭. */
+        {
+            double knee_amp = 45.0;
+            double left_bend = -cos(t);
+            double right_bend = -cos(t + CAM_PI);
+            if (left_bend < 0.0) left_bend = 0.0;
+            if (right_bend < 0.0) right_bend = 0.0;
+            left_knee_angle = left_bend * knee_amp;
+            right_knee_angle = right_bend * knee_amp;
+        }
     }
 
     /* 주인공은 경로 모드일 때만 이 t로부터 위치를 다시 계산한다.

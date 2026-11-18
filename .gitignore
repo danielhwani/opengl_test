@@ -1,6 +1,7 @@
 *.exe
 *.o
 *.obj
+*.dll
 __pycache__/
 
 # gen_humanoid_assets.exe로 재생성 가능한 산출물
@@ -27,6 +28,12 @@ head_ros.mtl
 nose_ros.mtl
 arm_ros.mtl
 leg_ros.mtl
+shin_ros.mtl
+pelvis_ros.mtl
+chest_ros.mtl
+foot_ros.mtl
+forearm_ros.mtl
+hand_ros.mtl
 quad_body_ros.mtl
 quad_head_ros.mtl
 quad_leg_ros.mtl

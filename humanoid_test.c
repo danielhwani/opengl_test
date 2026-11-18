@@ -74,7 +74,12 @@
 #define SHOULDER_X (BODY_W / 2.0 + ARM_W / 2.0)
 
 #define LEG_W 0.3
-#define LEG_LEN 1.2
+/* 무릎 관절 추가(2026-11-17) - 4족 로봇과 같은 트릭: LEG_LEN을
+   THIGH_LEN+SHIN_LEN(각 0.6)으로 나눠서 다리가 펴진 상태의 총 길이는
+   그대로 보존한다 - gen_humanoid_assets.c와 완전히 같은 값을 쓴다. */
+#define THIGH_LEN 0.6
+#define SHIN_LEN 0.6
+#define LEG_LEN (THIGH_LEN + SHIN_LEN)
 #define LEG_D 0.3
 #define HIP_X ((BODY_W - LEG_W) / 2.0)
 
@@ -84,6 +89,8 @@ static double left_angle = 0.0;
 static double right_angle = 0.0;
 static double left_leg_angle = 0.0;
 static double right_leg_angle = 0.0;
+static double left_knee_angle = 0.0;
+static double right_knee_angle = 0.0;
 /* 몸통 전체의 월드 위치/방향 - 팔다리와 달리 "관절"이 아니라 트리
    전체(ROOT)에 적용되는 변환이라 다른 모든 부위를 다 끌고 다닌다. */
 static double body_x = 0.0;
@@ -512,8 +519,25 @@ static void draw_leg(double side_x) {
     } else if (!rendering_shadow) {
         glColor3f(0.35f, 0.35f, 0.45f);
     }
-    glTranslated(side_x, -LEG_LEN / 2.0, 0.0);
-    glScaled(LEG_W, LEG_LEN, LEG_D);
+    glTranslated(side_x, -THIGH_LEN / 2.0, 0.0);
+    glScaled(LEG_W, THIGH_LEN, LEG_D);
+    glutSolidCube(1.0);
+    glPopMatrix();
+}
+
+/* 종아리: 무릎(현재 원점)에서 아래로 매달리는 상자 - draw_leg()와
+   같은 원리, side_x 이동이 없는 이유는 호출하는 쪽에서 이미 허벅지
+   끝으로 옮겨놓은 상태라서다(4족의 draw_quad_shin()과 동일 패턴). */
+static void draw_shin(void) {
+    glPushMatrix();
+    if (tex_on()) {
+        glBindTexture(GL_TEXTURE_2D, pants_texture_id);
+        if (!rendering_shadow) glColor3f(outfit_tint[0], outfit_tint[1], outfit_tint[2]);
+    } else if (!rendering_shadow) {
+        glColor3f(0.30f, 0.30f, 0.40f);
+    }
+    glTranslated(0.0, -SHIN_LEN / 2.0, 0.0);
+    glScaled(LEG_W, SHIN_LEN, LEG_D);
     glutSolidCube(1.0);
     glPopMatrix();
 }
@@ -557,11 +581,25 @@ static void draw_humanoid_body(double x, double z, double heading) {
         glPushMatrix();
             glRotated(left_leg_angle, 1, 0, 0);  /* left_leg: T1*T3*R3 */
             draw_leg(-HIP_X);
+            glPushMatrix();
+                /* 무릎: 허벅지 끝 - draw_leg(side_x)가 내부에서 쓰는
+                   것과 똑같은 (side_x, -THIGH_LEN) 오프셋을 여기서도
+                   그대로 써야 허벅지 바닥에 정확히 붙는다(draw_leg의
+                   기존 회전 피벗 동작은 그대로 유지, 안 건드림). */
+                glTranslated(-HIP_X, -THIGH_LEN, 0.0);
+                glRotated(left_knee_angle, 1, 0, 0);
+                draw_shin();
+            glPopMatrix();
         glPopMatrix();                            /* -> T1*T3 복귀 (R3 제거) */
 
         glPushMatrix();
             glRotated(right_leg_angle, 1, 0, 0); /* right_leg: T1*T3*R4 (R3 영향 없음) */
             draw_leg(HIP_X);
+            glPushMatrix();
+                glTranslated(HIP_X, -THIGH_LEN, 0.0);
+                glRotated(right_knee_angle, 1, 0, 0);
+                draw_shin();
+            glPopMatrix();
         glPopMatrix();                            /* -> T1*T3 복귀 (R4 제거) */
     glPopMatrix();                                /* -> T1 복귀 (legs 변환 제거) */
 }
@@ -1015,6 +1053,22 @@ static void idle(void) {
            움직여야 자연스럽다 (오른팔이 앞으로 나올 때 왼다리가 앞으로). */
         left_leg_angle = -25.0 * sin(t);
         right_leg_angle = 25.0 * sin(t);
+
+        /* 무릎(코스메틱, 물리와 무관) - 4족과 같은 공식
+           (max(0,-cos(phase))), 좌우 다리가 반대 위상이라 무릎도
+           phase+pi만큼 어긋난다. 여기도 순수 기구학적 애니메이션이라
+           물리 보행 데모(MuJoCo)가 안정성 때문에 쓰는 작은 진폭
+           제약이 없어서, 4족 때처럼 더 크게(45도) 잡아 눈에 잘
+           보이게 한다. */
+        {
+            double knee_amp = 45.0;
+            double left_bend = -cos(t);
+            double right_bend = -cos(t + CAM_PI);
+            if (left_bend < 0.0) left_bend = 0.0;
+            if (right_bend < 0.0) right_bend = 0.0;
+            left_knee_angle = left_bend * knee_amp;
+            right_knee_angle = right_bend * knee_amp;
+        }
     }
 
     /* 주인공은 경로 모드일 때만 이 t로부터 위치를 다시 계산한다.
